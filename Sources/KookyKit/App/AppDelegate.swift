@@ -1,8 +1,21 @@
 import AppKit
 import SwiftUI
 
+/// Namespace for the View menu's Tab/Workspace switch items. Tags share a
+/// single integer field on `NSMenuItem`, so we partition them: 1...9 for tabs
+/// (matching ⌘N), 101...109 for workspaces (⌥⌘N). The 100 offset keeps both
+/// sets identifiable from `menuNeedsUpdate`.
+private enum MenuTag {
+    static let tabRange = 1...9
+    static let workspaceRange = 101...109
+    static func tab(_ n: Int) -> Int { n }
+    static func workspace(_ n: Int) -> Int { 100 + n }
+    static func tabIndex(from tag: Int) -> Int { tag - 1 }
+    static func workspaceIndex(from tag: Int) -> Int { tag - 101 }
+}
+
 @MainActor
-public final class AppDelegate: NSObject, NSApplicationDelegate {
+public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var window: NSWindow?
     let store = WorkspaceStore()
     private lazy var hookServer = HookServer { [weak store] agent, event, sessionId in
@@ -96,14 +109,39 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         mainMenu.addItem(submenu(editMenu))
 
-        let windowMenu = NSMenu(title: "Window")
-        for n in 1...9 {
+        let viewMenu = NSMenu(title: "View")
+        viewMenu.delegate = self
+        for n in MenuTag.tabRange {
             let item = menuItem(title: "Tab \(n)", action: #selector(handleSwitchTab(_:)), keyEquivalent: "\(n)")
-            item.tag = n
-            windowMenu.addItem(item)
+            item.tag = MenuTag.tab(n)
+            viewMenu.addItem(item)
         }
-        windowMenu.addItem(.separator())
+        viewMenu.addItem(.separator())
+        for n in 1...9 {
+            let item = menuItem(
+                title: "Workspace \(n)",
+                action: #selector(handleSwitchWorkspace(_:)),
+                keyEquivalent: "\(n)",
+                modifiers: [.command, .option]
+            )
+            item.tag = MenuTag.workspace(n)
+            viewMenu.addItem(item)
+        }
+        mainMenu.addItem(submenu(viewMenu))
+
+        let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(menuItem(title: "Center", action: #selector(handleCenterWindow), keyEquivalent: ""))
+        windowMenu.addItem(.separator())
+        let fullScreenItem = NSMenuItem(
+            title: "Toggle Full Screen",
+            action: #selector(NSWindow.toggleFullScreen(_:)),
+            keyEquivalent: "f"
+        )
+        fullScreenItem.keyEquivalentModifierMask = [.command, .control]
+        windowMenu.addItem(fullScreenItem)
         mainMenu.addItem(submenu(windowMenu))
 
         NSApp.mainMenu = mainMenu
@@ -181,12 +219,40 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         store.closeWorkspace(workspace)
     }
 
+    // MARK: - NSMenuDelegate
+
+    public func menuNeedsUpdate(_ menu: NSMenu) {
+        // Hidden NSMenuItems don't fire their keyEquivalents — pressing ⌘5
+        // with 3 tabs is a no-op, matching what the menu shows.
+        let tabCount = store.active?.activePane?.tabs.count ?? 0
+        let workspaceCount = store.workspaces.count
+        for item in menu.items {
+            if MenuTag.tabRange.contains(item.tag) {
+                item.isHidden = item.tag > tabCount
+            } else if MenuTag.workspaceRange.contains(item.tag) {
+                item.isHidden = MenuTag.workspaceIndex(from: item.tag) >= workspaceCount
+            }
+        }
+    }
+
+    @objc private func handleCenterWindow() {
+        // NSWindow.center() takes no sender arg, so it can't be a direct
+        // first-responder selector — wrap it.
+        NSApp.keyWindow?.center()
+    }
+
     @objc private func handleSwitchTab(_ sender: NSMenuItem) {
-        let index = sender.tag - 1
+        let index = MenuTag.tabIndex(from: sender.tag)
         guard let workspace = store.active,
               let pane = workspace.activePane,
               index >= 0, index < pane.tabs.count else { return }
         store.activateTab(pane.tabs[index], in: workspace)
+    }
+
+    @objc private func handleSwitchWorkspace(_ sender: NSMenuItem) {
+        let index = MenuTag.workspaceIndex(from: sender.tag)
+        guard index >= 0, index < store.workspaces.count else { return }
+        store.activateWorkspace(store.workspaces[index])
     }
 
     #if DEBUG

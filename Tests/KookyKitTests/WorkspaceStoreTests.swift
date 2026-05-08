@@ -198,6 +198,38 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertEqual(ws.activePaneId, new.id)
     }
 
+    func testCrossPaneMoveOfRootSoleTabKeepsWorkspaceAlive() {
+        // Regression: after splitPane, the root PaneNode kept the original
+        // pane's id; the wrapper for that pane (now `firstChild`) reused the
+        // same id. Closing the now-empty source pane via id-equality would
+        // route to closeWorkspace and terminate the freshly-moved session.
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        let original = firstPane(ws)
+        let originalSession = original.tabs[0]
+        let new = store.splitPane(original, orientation: .horizontal, in: ws)!
+        XCTAssertEqual(ws.root.allPanes.count, 2)
+        store.moveTab(originalSession, to: new, at: new.tabs.count, in: ws)
+        XCTAssertFalse(store.workspaces.isEmpty)
+        XCTAssertEqual(ws.root.allPanes.count, 1)
+        XCTAssertTrue(new.tabs.contains { $0.id == originalSession.id })
+        XCTAssertEqual(engine(originalSession).terminateCount, 0)
+    }
+
+    func testCrossPaneMoveSyncsWorkspaceWorkingDirectory() {
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let source = firstPane(ws)
+        let session = source.tabs[0]
+        engine(session).emitPwd("/tmp/projectA/sub")
+        let dest = store.splitPane(source, orientation: .horizontal, in: ws)!
+        // splitPane spawns a new session in dest; switch active away first so
+        // the move into dest is the thing that has to sync the cwd.
+        store.focusPane(source, in: ws)
+        store.moveTab(session, to: dest, at: dest.tabs.count, in: ws)
+        XCTAssertEqual(ws.workingDirectory.path, "/tmp/projectA/sub")
+    }
+
     // MARK: Persistence
 
     func testRestoreSinglePaneWorkspace() {

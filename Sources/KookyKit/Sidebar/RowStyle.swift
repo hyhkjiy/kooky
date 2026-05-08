@@ -99,6 +99,34 @@ extension KookyMenuRow where Leading == EmptyView {
     }
 }
 
+extension View {
+    /// 2pt drop-target indicator anchored to one edge of the view, animated on
+    /// the `active` toggle. Used by reorder gestures (sidebar workspaces, tab
+    /// pills, the trailing `+` button) to show "drop will land here".
+    /// `offset` nudges the line into a visual gap between sibling views.
+    /// `length` only applies to horizontal-axis (leading/trailing) edges.
+    func dropIndicator(active: Bool, on edge: Alignment, offset: CGFloat = 0, length: CGFloat = 22) -> some View {
+        let isVertical = edge == .top || edge == .bottom
+        return overlay(alignment: edge) {
+            let color = Theme.chromeForeground.opacity(active ? 0.55 : 0)
+            if isVertical {
+                Rectangle()
+                    .fill(color)
+                    .frame(height: 2)
+                    .padding(.horizontal, 4)
+                    .offset(y: offset)
+                    .animation(.easeOut(duration: 0.12), value: active)
+            } else {
+                Rectangle()
+                    .fill(color)
+                    .frame(width: 2, height: length)
+                    .offset(x: offset)
+                    .animation(.easeOut(duration: 0.12), value: active)
+            }
+        }
+    }
+}
+
 struct KookyMenuDivider: View {
     var body: some View {
         Rectangle()

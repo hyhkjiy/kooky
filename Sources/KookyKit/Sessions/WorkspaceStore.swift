@@ -5,6 +5,10 @@ import Foundation
 final class WorkspaceStore {
     private(set) var workspaces: [Workspace] = []
     private(set) var activeWorkspaceId: UUID?
+    /// Session id currently being dragged in any pane's tab bar. Shared across
+    /// all `TabBarView` instances so target panes can show drop indicators
+    /// even when the source lives in a different pane.
+    var draggingTabId: UUID?
 
     private let engineFactory: @MainActor () -> any TerminalEngine
     private let persistence: any Persistence
@@ -75,6 +79,17 @@ final class WorkspaceStore {
         addWorkspace(workingDirectory: workspace.workingDirectory)
     }
 
+    /// Reorder workspaces in the sidebar — dragged workspace takes the
+    /// destination index, others shift.
+    func moveWorkspace(from sourceIndex: Int, to destIndex: Int) {
+        guard sourceIndex != destIndex,
+              (0..<workspaces.count).contains(sourceIndex),
+              (0..<workspaces.count).contains(destIndex) else { return }
+        let ws = workspaces.remove(at: sourceIndex)
+        workspaces.insert(ws, at: destIndex)
+        scheduleSave()
+    }
+
     func closeOtherWorkspaces(keeping workspace: Workspace) {
         let others = workspaces.filter { $0.id != workspace.id }
         for ws in others { closeWorkspace(ws) }
@@ -108,6 +123,62 @@ final class WorkspaceStore {
     func duplicateTab(_ session: Session, in workspace: Workspace) -> Session? {
         guard let pane = pane(containing: session, in: workspace) else { return nil }
         return addTab(in: workspace, pane: pane, template: session.agent, initialCwd: session.currentDirectory)
+    }
+
+    func moveTab(from sourceIndex: Int, to destIndex: Int, in pane: Pane) {
+        guard sourceIndex != destIndex,
+              (0..<pane.tabs.count).contains(sourceIndex),
+              (0..<pane.tabs.count).contains(destIndex) else { return }
+        let tab = pane.tabs.remove(at: sourceIndex)
+        pane.tabs.insert(tab, at: destIndex)
+        scheduleSave()
+    }
+
+    /// Move a tab from its current pane to a different pane at a specific
+    /// index. If the source pane runs out of tabs as a result, it collapses
+    /// (sibling pane takes its place in the split tree). The session itself
+    /// is preserved — same engine, same scrollback, same agent state.
+    func moveTab(_ session: Session, to destPane: Pane, at destIndex: Int, in workspace: Workspace) {
+        guard let sourcePane = workspace.root.pane(containingSessionId: session.id) else { return }
+        if sourcePane.id == destPane.id { return }
+        guard let sourceIndex = sourcePane.tabs.firstIndex(where: { $0.id == session.id }) else { return }
+        sourcePane.tabs.remove(at: sourceIndex)
+        if sourcePane.activeTabId == session.id {
+            sourcePane.activeTabId = sourcePane.tabs.first?.id
+        }
+        let insertIndex = min(max(destIndex, 0), destPane.tabs.count)
+        destPane.tabs.insert(session, at: insertIndex)
+        destPane.activeTabId = session.id
+        workspace.activePaneId = destPane.id
+        // Cross-pane move promotes the dragged session to active; mirror what
+        // `activateTab` does so the sidebar title + next-spawned tab cwd
+        // follow the new focus instead of waiting for the next OSC 7.
+        if workspace.workingDirectory != session.currentDirectory {
+            workspace.workingDirectory = session.currentDirectory
+        }
+        if sourcePane.tabs.isEmpty {
+            closePane(sourcePane, in: workspace)
+        }
+        scheduleSave()
+    }
+
+    /// One-shot drop handler for tab reorder gestures. Dispatches to the
+    /// same-pane index-to-index reorder when source == dest, or the cross-pane
+    /// session move otherwise. `destIndex` is the target item's current index
+    /// in `destPane.tabs` (or `destPane.tabs.count` for "drop at end").
+    @discardableResult
+    func handleTabDrop(droppedId: UUID, to destPane: Pane, at destIndex: Int, in workspace: Workspace) -> Bool {
+        guard let sourcePane = workspace.root.pane(containingSessionId: droppedId),
+              let session = sourcePane.tabs.first(where: { $0.id == droppedId }) else { return false }
+        if sourcePane.id == destPane.id {
+            guard let from = sourcePane.tabs.firstIndex(where: { $0.id == droppedId }) else { return false }
+            let to = min(max(destIndex, 0), sourcePane.tabs.count - 1)
+            guard from != to else { return false }
+            moveTab(from: from, to: to, in: sourcePane)
+        } else {
+            moveTab(session, to: destPane, at: destIndex, in: workspace)
+        }
+        return true
     }
 
     func closeOtherTabs(keeping session: Session, in workspace: Workspace) {
@@ -190,7 +261,12 @@ final class WorkspaceStore {
     func closePane(_ pane: Pane, in workspace: Workspace) {
         guard let leafNode = workspace.root.paneNode(paneId: pane.id) else { return }
         for tab in pane.tabs { tab.engine.terminate() }
-        if leafNode.id == workspace.root.id {
+        // Object identity, not id equality. After `splitPane`, the workspace
+        // root keeps its original id but its content becomes a `.split`, while
+        // a freshly-constructed child `PaneNode(pane: existing)` reuses the
+        // same `pane.id`. Comparing ids would falsely match a leaf child whose
+        // pane shares an id with the root and route through `closeWorkspace`.
+        if leafNode === workspace.root {
             closeWorkspace(workspace)
             return
         }
