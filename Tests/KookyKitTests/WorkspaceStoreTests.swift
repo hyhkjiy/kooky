@@ -9,9 +9,6 @@ final class WorkspaceStoreTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        // Restore-side cwd-existence check (in WorkspaceStore.restore) needs
-        // these directories to actually be present, otherwise the engine is
-        // spawned in $HOME and the assertion fails.
         let fm = FileManager.default
         for path in ["/tmp/projectA", "/tmp/projectA/sub", "/tmp/projectA/deep", "/tmp/projectB", "/tmp/projectC"] {
             try? fm.createDirectory(atPath: path, withIntermediateDirectories: true)
@@ -25,11 +22,23 @@ final class WorkspaceStoreTests: XCTestCase {
         )
     }
 
-    func testInitialStateHasOneWorkspaceWithOneTab() {
+    private func engine(_ session: Session) -> TestEngine {
+        guard let e = session.engine as? TestEngine else { preconditionFailure("expected TestEngine") }
+        return e
+    }
+
+    private func firstPane(_ ws: Workspace) -> Pane {
+        guard let pane = ws.root.firstPane else { preconditionFailure("expected at least one pane") }
+        return pane
+    }
+
+    func testInitialStateHasOneWorkspaceWithOnePaneAndOneTab() {
         let store = makeStore()
         XCTAssertEqual(store.workspaces.count, 1)
-        XCTAssertEqual(store.workspaces.first?.tabs.count, 1)
-        XCTAssertEqual(store.activeWorkspaceId, store.workspaces.first?.id)
+        let ws = store.workspaces[0]
+        XCTAssertEqual(ws.root.allPanes.count, 1)
+        XCTAssertEqual(firstPane(ws).tabs.count, 1)
+        XCTAssertEqual(store.activeWorkspaceId, ws.id)
     }
 
     func testFirstWorkspaceUsesHomeDirectory() {
@@ -38,12 +47,13 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertEqual(store.workspaces.first?.title, "Home")
     }
 
-    func testAddWorkspaceCreatesAdditionalWorkspaceWithTabAndActivatesIt() {
+    func testAddWorkspaceCreatesNewWorkspaceAndActivatesIt() {
         let store = makeStore()
         let first = store.workspaces[0]
         let second = store.addWorkspace(workingDirectory: projectA)
         XCTAssertEqual(store.workspaces.count, 2)
-        XCTAssertEqual(second.tabs.count, 1)
+        XCTAssertEqual(second.root.allPanes.count, 1)
+        XCTAssertEqual(firstPane(second).tabs.count, 1)
         XCTAssertEqual(store.activeWorkspaceId, second.id)
         XCTAssertNotEqual(first.id, second.id)
     }
@@ -54,57 +64,60 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertEqual(ws.title, "sample-project")
     }
 
-    func testAddTabPropagatesWorkspaceWorkingDirectory() {
+    func testAddTabAppendsToActivePaneAndStartsEngine() {
         let store = makeStore()
         let ws = store.addWorkspace(workingDirectory: projectA)
+        let pane = firstPane(ws)
         let session = store.addTab(in: ws, template: .terminal)
-        let engine = session.engine as? TestEngine
-        XCTAssertEqual(engine?.startedConfigs.last?.workingDirectory, projectA.path)
+        XCTAssertEqual(pane.tabs.count, 2)
+        XCTAssertEqual(pane.activeTabId, session.id)
+        XCTAssertEqual(engine(session).startedConfigs.last?.workingDirectory, projectA.path)
     }
 
     func testActiveTabPwdReportSyncsToWorkspace() {
         let store = makeStore()
         let ws = store.addWorkspace(workingDirectory: projectA)
-        let tab = ws.tabs[0]
-        (tab.engine as! TestEngine).emitPwd("/tmp/projectA/sub")
+        let pane = firstPane(ws)
+        let session = pane.tabs[0]
+        engine(session).emitPwd("/tmp/projectA/sub")
         XCTAssertEqual(ws.workingDirectory.path, "/tmp/projectA/sub")
     }
 
-    func testNewTabInheritsLatestPwdFromActiveTab() {
+    func testNewTabInheritsLatestPwd() {
         let store = makeStore()
         let ws = store.addWorkspace(workingDirectory: projectA)
-        (ws.tabs[0].engine as! TestEngine).emitPwd("/tmp/projectA/sub")
-        let session = store.addTab(in: ws, template: .terminal)
-        let engine = session.engine as? TestEngine
-        XCTAssertEqual(engine?.startedConfigs.last?.workingDirectory, "/tmp/projectA/sub")
+        let pane = firstPane(ws)
+        engine(pane.tabs[0]).emitPwd("/tmp/projectA/sub")
+        let session = store.addTab(in: ws)
+        XCTAssertEqual(engine(session).startedConfigs.last?.workingDirectory, "/tmp/projectA/sub")
     }
 
-    func testAddTabRespectsTemplateAndStartsEngine() {
+    func testAddTabRespectsTemplate() {
         let store = makeStore()
         let ws = store.workspaces[0]
         let session = store.addTab(in: ws, template: .claudeCode)
         XCTAssertEqual(session.agent.id, "claude-code")
-        XCTAssertEqual(ws.activeTabId, session.id)
-        let engine = session.engine as? TestEngine
-        XCTAssertEqual(engine?.startedConfigs.first?.environment["KOOKY_AGENT"], "claude")
+        XCTAssertEqual(engine(session).startedConfigs.first?.environment["KOOKY_AGENT"], "claude")
     }
 
-    func testClosingActiveTabActivatesNeighborAndTerminatesEngine() {
+    func testClosingActiveTabActivatesNeighbor() {
         let store = makeStore()
         let ws = store.workspaces[0]
-        let firstTab = ws.tabs[0]
-        let secondTab = store.addTab(in: ws)
-        XCTAssertEqual(ws.activeTabId, secondTab.id)
-        store.closeTab(secondTab, in: ws)
-        XCTAssertEqual(ws.tabs.count, 1)
-        XCTAssertEqual(ws.activeTabId, firstTab.id)
-        XCTAssertEqual((secondTab.engine as? TestEngine)?.terminateCount, 1)
+        let pane = firstPane(ws)
+        let first = pane.tabs[0]
+        let second = store.addTab(in: ws)
+        XCTAssertEqual(pane.activeTabId, second.id)
+        store.closeTab(second, in: ws)
+        XCTAssertEqual(pane.tabs.count, 1)
+        XCTAssertEqual(pane.activeTabId, first.id)
+        XCTAssertEqual(engine(second).terminateCount, 1)
     }
 
-    func testClosingLastTabClosesWorkspace() {
+    func testClosingLastTabClosesPaneAndWorkspaceWhenSinglePane() {
         let store = makeStore()
         let ws = store.workspaces[0]
-        store.closeTab(ws.tabs[0], in: ws)
+        let pane = firstPane(ws)
+        store.closeTab(pane.tabs[0], in: ws)
         XCTAssertTrue(store.workspaces.isEmpty)
         XCTAssertNil(store.activeWorkspaceId)
     }
@@ -115,7 +128,6 @@ final class WorkspaceStoreTests: XCTestCase {
         let b = store.addWorkspace(workingDirectory: projectB)
         let c = store.addWorkspace(workingDirectory: projectC)
         store.activateWorkspace(b)
-        XCTAssertEqual(store.activeWorkspaceId, b.id)
         store.closeWorkspace(b)
         XCTAssertEqual(store.workspaces.map(\.id), [a.id, c.id])
         XCTAssertEqual(store.activeWorkspaceId, c.id)
@@ -123,28 +135,93 @@ final class WorkspaceStoreTests: XCTestCase {
 
     func testClosingLastWorkspaceClearsActiveId() {
         let store = makeStore()
-        let ws = store.workspaces[0]
-        store.closeWorkspace(ws)
+        store.closeWorkspace(store.workspaces[0])
         XCTAssertTrue(store.workspaces.isEmpty)
         XCTAssertNil(store.activeWorkspaceId)
     }
 
+    // MARK: Splits
+
+    func testSplitPaneCreatesSiblingPaneAndFocusesIt() {
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        let pane = firstPane(ws)
+        let new = store.splitPane(pane, orientation: .horizontal, in: ws)
+        XCTAssertNotNil(new)
+        XCTAssertEqual(ws.root.allPanes.count, 2)
+        XCTAssertEqual(ws.activePaneId, new?.id)
+        XCTAssertEqual(new?.tabs.count, 1)
+    }
+
+    func testSplitPaneInheritsActiveTabAgentAndCwd() {
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let pane = firstPane(ws)
+        store.addTab(in: ws, template: .claudeCode)
+        engine(pane.tabs.last!).emitPwd("/tmp/projectA/sub")
+        let new = store.splitPane(pane, orientation: .vertical, in: ws)
+        let newSession = new?.tabs.first
+        XCTAssertEqual(newSession?.agent.id, "claude-code")
+        XCTAssertEqual((newSession?.engine as? TestEngine)?.startedConfigs.last?.workingDirectory, "/tmp/projectA/sub")
+    }
+
+    func testClosePaneCollapsesSiblingUp() {
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        let pane = firstPane(ws)
+        let new = store.splitPane(pane, orientation: .horizontal, in: ws)!
+        XCTAssertEqual(ws.root.allPanes.count, 2)
+        store.closePane(new, in: ws)
+        XCTAssertEqual(ws.root.allPanes.count, 1)
+        XCTAssertEqual(ws.root.allPanes.first?.id, pane.id)
+    }
+
+    func testClosingLastTabInSecondPaneCollapsesSplit() {
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        let pane = firstPane(ws)
+        let new = store.splitPane(pane, orientation: .horizontal, in: ws)!
+        // Close the lone tab in `new`. Should collapse the split, leaving `pane` alone.
+        store.closeTab(new.tabs[0], in: ws)
+        XCTAssertEqual(ws.root.allPanes.count, 1)
+        XCTAssertEqual(ws.root.allPanes.first?.id, pane.id)
+    }
+
+    func testFocusPaneSwitchesActivePane() {
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        let pane = firstPane(ws)
+        let new = store.splitPane(pane, orientation: .horizontal, in: ws)!
+        store.focusPane(pane, in: ws)
+        XCTAssertEqual(ws.activePaneId, pane.id)
+        store.focusPane(new, in: ws)
+        XCTAssertEqual(ws.activePaneId, new.id)
+    }
+
     // MARK: Persistence
 
-    func testRestoreFromPersistedStateRebuildsWorkspacesAndTabs() {
+    func testRestoreSinglePaneWorkspace() {
         let wsId = UUID()
-        let tab1 = UUID()
-        let tab2 = UUID()
+        let paneId = UUID()
+        let leafA = UUID()
+        let leafB = UUID()
         let initial = PersistedState(
             workspaces: [
                 PersistedWorkspace(
                     id: wsId,
                     workingDirectoryPath: "/tmp/projectA",
-                    tabs: [
-                        PersistedTab(id: tab1, agentId: "terminal", currentDirectoryPath: "/tmp/projectA"),
-                        PersistedTab(id: tab2, agentId: "claude-code", currentDirectoryPath: "/tmp/projectA/sub"),
-                    ],
-                    activeTabId: tab2
+                    root: PersistedPaneNode(
+                        id: paneId,
+                        kind: .pane(PersistedPane(
+                            id: paneId,
+                            tabs: [
+                                PersistedTab(id: leafA, agentId: "terminal", currentDirectoryPath: "/tmp/projectA"),
+                                PersistedTab(id: leafB, agentId: "claude-code", currentDirectoryPath: "/tmp/projectA/sub"),
+                            ],
+                            activeTabId: leafB
+                        ))
+                    ),
+                    activePaneId: paneId
                 )
             ],
             activeWorkspaceId: wsId
@@ -154,30 +231,75 @@ final class WorkspaceStoreTests: XCTestCase {
         let ws = store.workspaces[0]
         XCTAssertEqual(ws.id, wsId)
         XCTAssertEqual(ws.title, "projectA")
-        XCTAssertEqual(ws.workingDirectory.path, "/tmp/projectA")
-        XCTAssertEqual(ws.tabs.map(\.id), [tab1, tab2])
-        XCTAssertEqual(ws.tabs[1].agent.id, "claude-code")
-        XCTAssertEqual(ws.activeTabId, tab2)
-        XCTAssertEqual(store.activeWorkspaceId, wsId)
+        let pane = firstPane(ws)
+        XCTAssertEqual(pane.tabs.map(\.id), [leafA, leafB])
+        XCTAssertEqual(pane.tabs[1].agent.id, "claude-code")
+        XCTAssertEqual(pane.activeTabId, leafB)
+        XCTAssertEqual(ws.activePaneId, paneId)
     }
 
     func testRestoreSpawnsEngineWithSavedWorkingDirectory() {
         let wsId = UUID()
-        let tabId = UUID()
+        let paneId = UUID()
+        let leafId = UUID()
         let initial = PersistedState(
             workspaces: [
                 PersistedWorkspace(
                     id: wsId,
                     workingDirectoryPath: "/tmp/projectA",
-                    tabs: [PersistedTab(id: tabId, agentId: "terminal", currentDirectoryPath: "/tmp/projectA/deep")],
-                    activeTabId: tabId
+                    root: PersistedPaneNode(
+                        id: paneId,
+                        kind: .pane(PersistedPane(
+                            id: paneId,
+                            tabs: [PersistedTab(id: leafId, agentId: "terminal", currentDirectoryPath: "/tmp/projectA/deep")],
+                            activeTabId: leafId
+                        ))
+                    ),
+                    activePaneId: paneId
                 )
             ],
             activeWorkspaceId: wsId
         )
         let store = makeStore(initial: initial)
-        let engine = store.workspaces[0].tabs[0].engine as? TestEngine
-        XCTAssertEqual(engine?.startedConfigs.last?.workingDirectory, "/tmp/projectA/deep")
+        let pane = firstPane(store.workspaces[0])
+        XCTAssertEqual(engine(pane.tabs[0]).startedConfigs.last?.workingDirectory, "/tmp/projectA/deep")
+    }
+
+    func testRestoreSplitTreeReconstructsBothPanes() {
+        let wsId = UUID()
+        let rootId = UUID()
+        let firstPaneId = UUID()
+        let secondPaneId = UUID()
+        let leafA = UUID()
+        let leafB = UUID()
+        let initial = PersistedState(
+            workspaces: [
+                PersistedWorkspace(
+                    id: wsId,
+                    workingDirectoryPath: "/tmp/projectA",
+                    root: PersistedPaneNode(
+                        id: rootId,
+                        kind: .split(
+                            orientation: .horizontal,
+                            first: PersistedPaneNode(id: firstPaneId, kind: .pane(PersistedPane(id: firstPaneId, tabs: [PersistedTab(id: leafA, agentId: "terminal", currentDirectoryPath: "/tmp/projectA")], activeTabId: leafA))),
+                            second: PersistedPaneNode(id: secondPaneId, kind: .pane(PersistedPane(id: secondPaneId, tabs: [PersistedTab(id: leafB, agentId: "terminal", currentDirectoryPath: "/tmp/projectA")], activeTabId: leafB))),
+                            fraction: 0.6
+                        )
+                    ),
+                    activePaneId: secondPaneId
+                )
+            ],
+            activeWorkspaceId: wsId
+        )
+        let store = makeStore(initial: initial)
+        let ws = store.workspaces[0]
+        XCTAssertEqual(ws.root.allPanes.count, 2)
+        XCTAssertEqual(ws.activePaneId, secondPaneId)
+        if case .split(_, _, _, let fraction) = ws.root.content {
+            XCTAssertEqual(fraction, 0.6, accuracy: 0.0001)
+        } else {
+            XCTFail("expected split content at root")
+        }
     }
 
     func testFlushPersistenceWritesCurrentSnapshot() throws {

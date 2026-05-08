@@ -4,49 +4,73 @@ import Foundation
 @Observable
 final class Workspace: Identifiable {
     let id: UUID
-    /// Project root. New tabs spawn here; the active tab's OSC 7 reports keep
-    /// this in sync — `cd` in any tab updates the workspace, the next new tab
-    /// inherits the latest cwd.
+    /// Project root. New tabs spawn here; the active pane's active tab's OSC 7
+    /// reports keep this in sync — `cd` in any visible terminal updates the
+    /// workspace, the next new pane / tab inherits the latest path.
     var workingDirectory: URL
-    var tabs: [Session] = []
-    var activeTabId: UUID?
+    /// Single split tree per workspace. Always non-nil; a fresh workspace
+    /// holds one Pane with one Session.
+    var root: PaneNode
+    /// Currently focused leaf-pane id. Splits/closes update this so cwd
+    /// tracking and ⌘D act on what the user is looking at.
+    var activePaneId: UUID?
 
-    /// Sidebar label — derived from `workingDirectory` so it tracks `cd`s
-    /// instead of freezing at create time. `~` shows as "Home"; everything
-    /// else uses the path's last component (falls back to the full path
-    /// when that's empty, e.g. `/`).
     var title: String {
         if workingDirectory.path == NSHomeDirectory() { return "Home" }
         let last = workingDirectory.lastPathComponent
         return last.isEmpty ? workingDirectory.path : last
     }
 
-    var activeTab: Session? {
-        tabs.first { $0.id == activeTabId }
+    var activePane: Pane? {
+        if let id = activePaneId, let pane = root.pane(id: id) { return pane }
+        return root.firstPane
     }
 
-    /// Distinct non-terminal agents currently running in this workspace, in
-    /// first-tab order. Lets the sidebar surface "what's running here".
-    var distinctAgents: [AgentTemplate] {
+    var activeSession: Session? { activePane?.activeTab }
+
+    /// Distinct non-terminal agents and aggregated activity, computed in a
+    /// single tree walk. Sidebar reads both per render — fold them so we
+    /// allocate one DFS, not two.
+    private var aggregate: (agents: [AgentTemplate], state: SessionActivityState) {
         var seen: Set<String> = []
-        var result: [AgentTemplate] = []
-        for tab in tabs where tab.agent.id != AgentTemplate.terminal.id && !seen.contains(tab.agent.id) {
-            seen.insert(tab.agent.id)
-            result.append(tab.agent)
+        var agents: [AgentTemplate] = []
+        var state: SessionActivityState = .idle
+        var stop = false
+        walk(root) { pane in
+            for tab in pane.tabs {
+                if tab.agent.id != AgentTemplate.terminal.id, !seen.contains(tab.agent.id) {
+                    seen.insert(tab.agent.id)
+                    agents.append(tab.agent)
+                }
+                if tab.activityState == .attention {
+                    state = .attention
+                    stop = true
+                    return
+                }
+                if tab.activityState == .running { state = .running }
+            }
+        } shouldStop: { stop }
+        return (agents, state)
+    }
+
+    var distinctAgents: [AgentTemplate] { aggregate.agents }
+    var activityState: SessionActivityState { aggregate.state }
+
+    private func walk(_ node: PaneNode, visit: (Pane) -> Void, shouldStop: () -> Bool) {
+        switch node.content {
+        case .pane(let p):
+            visit(p)
+        case .split(_, let a, let b, _):
+            walk(a, visit: visit, shouldStop: shouldStop)
+            if shouldStop() { return }
+            walk(b, visit: visit, shouldStop: shouldStop)
         }
-        return result
     }
 
-    /// Aggregated state for the sidebar dot — `.attention` wins over `.running`
-    /// wins over `.idle` so the most-needs-the-user signal surfaces first.
-    var activityState: SessionActivityState {
-        if tabs.contains(where: { $0.activityState == .attention }) { return .attention }
-        if tabs.contains(where: { $0.activityState == .running }) { return .running }
-        return .idle
-    }
-
-    init(id: UUID = UUID(), workingDirectory: URL) {
+    init(id: UUID = UUID(), workingDirectory: URL, root: PaneNode) {
         self.id = id
         self.workingDirectory = workingDirectory
+        self.root = root
+        self.activePaneId = root.firstPane?.id
     }
 }

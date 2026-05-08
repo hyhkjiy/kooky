@@ -76,6 +76,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         fileMenu.addItem(.separator())
         fileMenu.addItem(menuItem(title: "Close Tab", action: #selector(handleCloseTab), keyEquivalent: "w"))
         fileMenu.addItem(menuItem(title: "Close Workspace", action: #selector(handleCloseWorkspace), keyEquivalent: "w", modifiers: [.command, .shift]))
+        fileMenu.addItem(.separator())
+        fileMenu.addItem(menuItem(title: "Split Right", action: #selector(handleSplitRight), keyEquivalent: "d"))
+        fileMenu.addItem(menuItem(title: "Split Down", action: #selector(handleSplitDown), keyEquivalent: "d", modifiers: [.command, .shift]))
+        fileMenu.addItem(menuItem(title: "Focus Next Pane", action: #selector(handleFocusNextPane), keyEquivalent: "]"))
+        fileMenu.addItem(menuItem(title: "Focus Previous Pane", action: #selector(handleFocusPreviousPane), keyEquivalent: "["))
         #if DEBUG
         fileMenu.addItem(.separator())
         fileMenu.addItem(menuItem(title: "Cycle Activity (debug)", action: #selector(handleCycleActivity), keyEquivalent: "a", modifiers: [.command, .shift]))
@@ -139,8 +144,36 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func handleCloseTab() {
-        guard let workspace = store.active, let tab = workspace.activeTab else { return }
-        store.closeTab(tab, in: workspace)
+        guard let workspace = store.active, let session = workspace.activeSession else { return }
+        store.closeTab(session, in: workspace)
+    }
+
+    @objc private func handleSplitRight() {
+        guard let workspace = store.active, let pane = workspace.activePane else { return }
+        store.splitPane(pane, orientation: .horizontal, in: workspace)
+    }
+
+    @objc private func handleSplitDown() {
+        guard let workspace = store.active, let pane = workspace.activePane else { return }
+        store.splitPane(pane, orientation: .vertical, in: workspace)
+    }
+
+    @objc private func handleFocusNextPane() {
+        cyclePaneFocus(forward: true)
+    }
+
+    @objc private func handleFocusPreviousPane() {
+        cyclePaneFocus(forward: false)
+    }
+
+    private func cyclePaneFocus(forward: Bool) {
+        guard let workspace = store.active else { return }
+        let panes = workspace.root.allPanes
+        guard panes.count > 1 else { return }
+        let currentId = workspace.activePaneId ?? panes.first?.id
+        let idx = panes.firstIndex(where: { $0.id == currentId }) ?? 0
+        let nextIdx = forward ? (idx + 1) % panes.count : (idx - 1 + panes.count) % panes.count
+        store.focusPane(panes[nextIdx], in: workspace)
     }
 
     @objc private func handleCloseWorkspace() {
@@ -150,17 +183,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func handleSwitchTab(_ sender: NSMenuItem) {
         let index = sender.tag - 1
-        guard let workspace = store.active, index >= 0, index < workspace.tabs.count else { return }
-        store.activateTab(workspace.tabs[index], in: workspace)
+        guard let workspace = store.active,
+              let pane = workspace.activePane,
+              index >= 0, index < pane.tabs.count else { return }
+        store.activateTab(pane.tabs[index], in: workspace)
     }
 
     #if DEBUG
     @objc private func handleCycleActivity() {
-        guard let tab = store.active?.activeTab else { return }
-        switch tab.activityState {
-        case .idle: tab.activityState = .running
-        case .running: tab.activityState = .attention
-        case .attention: tab.activityState = .idle
+        guard let session = store.active?.activeSession else { return }
+        switch session.activityState {
+        case .idle: session.activityState = .running
+        case .running: session.activityState = .attention
+        case .attention: session.activityState = .idle
         }
     }
     #endif

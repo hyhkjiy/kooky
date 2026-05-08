@@ -1,12 +1,18 @@
 import SwiftUI
 
 struct TabBarItem: View {
-    let tab: Session
+    @Bindable var tab: Session
     let isActive: Bool
+    let canCloseToRight: Bool
     let onActivate: () -> Void
     let onClose: () -> Void
+    let onCloseOthers: () -> Void
+    let onCloseToRight: () -> Void
+    let onDuplicate: () -> Void
+    let onSplit: (SplitOrientation) -> Void
 
     @State private var isHovered = false
+    @State private var isContextMenuOpen = false
 
     var body: some View {
         HStack(spacing: 7) {
@@ -32,6 +38,40 @@ struct TabBarItem: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: onActivate)
         .onHover { isHovered = $0 }
+        .overlay(RightClickCatcher { isContextMenuOpen = true })
+        .popover(isPresented: $isContextMenuOpen, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 0) {
+                KookyMenuRow(title: "Close Tab", shortcut: "⌘W") {
+                    isContextMenuOpen = false
+                    onClose()
+                }
+                KookyMenuRow(title: "Close Other Tabs") {
+                    isContextMenuOpen = false
+                    onCloseOthers()
+                }
+                KookyMenuRow(title: "Close Tabs to the Right", isDisabled: !canCloseToRight) {
+                    isContextMenuOpen = false
+                    onCloseToRight()
+                }
+                KookyMenuDivider()
+                KookyMenuRow(title: "Split Right", shortcut: "⌘D") {
+                    isContextMenuOpen = false
+                    onSplit(.horizontal)
+                }
+                KookyMenuRow(title: "Split Down", shortcut: "⌘⇧D") {
+                    isContextMenuOpen = false
+                    onSplit(.vertical)
+                }
+                KookyMenuDivider()
+                KookyMenuRow(title: "Duplicate Tab") {
+                    isContextMenuOpen = false
+                    onDuplicate()
+                }
+            }
+            .padding(Theme.space1)
+            .frame(minWidth: 240)
+            .background(Theme.chromeBackground)
+        }
     }
 
     private var rowBackground: Color {

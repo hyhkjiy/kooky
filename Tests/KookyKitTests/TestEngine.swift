@@ -8,6 +8,7 @@ final class TestEngine: TerminalEngine {
     let view: NSView = NSView()
     var backgroundColor: NSColor { .black }
     var onPwdChange: ((String) -> Void)?
+    var onFocus: (() -> Void)?
 
     private(set) var startedConfigs: [TerminalSessionConfig] = []
     private(set) var terminateCount = 0

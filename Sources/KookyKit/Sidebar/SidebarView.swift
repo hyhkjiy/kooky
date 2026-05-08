@@ -44,8 +44,11 @@ struct SidebarView: View {
                     SidebarWorkspaceRow(
                         workspace: workspace,
                         isActive: workspace.id == store.activeWorkspaceId,
+                        canCloseOthers: store.workspaces.count > 1,
                         onActivate: { store.activateWorkspace(workspace) },
-                        onClose: { store.closeWorkspace(workspace) }
+                        onClose: { store.closeWorkspace(workspace) },
+                        onCloseOthers: { store.closeOtherWorkspaces(keeping: workspace) },
+                        onDuplicate: { store.duplicateWorkspace(workspace) }
                     )
                 }
             }

@@ -3,10 +3,14 @@ import SwiftUI
 struct SidebarWorkspaceRow: View {
     let workspace: Workspace
     let isActive: Bool
+    let canCloseOthers: Bool
     let onActivate: () -> Void
     let onClose: () -> Void
+    let onCloseOthers: () -> Void
+    let onDuplicate: () -> Void
 
     @State private var isHovered = false
+    @State private var isContextMenuOpen = false
 
     var body: some View {
         HStack(spacing: Theme.space2) {
@@ -49,6 +53,27 @@ struct SidebarWorkspaceRow: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: onActivate)
         .onHover { isHovered = $0 }
+        .overlay(RightClickCatcher { isContextMenuOpen = true })
+        .popover(isPresented: $isContextMenuOpen, arrowEdge: .trailing) {
+            VStack(alignment: .leading, spacing: 0) {
+                KookyMenuRow(title: "Close Workspace", shortcut: "⌘⇧W") {
+                    isContextMenuOpen = false
+                    onClose()
+                }
+                KookyMenuRow(title: "Close Other Workspaces", isDisabled: !canCloseOthers) {
+                    isContextMenuOpen = false
+                    onCloseOthers()
+                }
+                KookyMenuDivider()
+                KookyMenuRow(title: "Duplicate Workspace") {
+                    isContextMenuOpen = false
+                    onDuplicate()
+                }
+            }
+            .padding(Theme.space1)
+            .frame(minWidth: 240)
+            .background(Theme.chromeBackground)
+        }
         .help(workspace.workingDirectory.path)
     }
 

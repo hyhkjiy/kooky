@@ -131,6 +131,10 @@ final class LibghosttyEngine: TerminalEngine {
         get { surfaceView.onPwdChange }
         set { surfaceView.onPwdChange = newValue }
     }
+    var onFocus: (() -> Void)? {
+        get { surfaceView.onFocus }
+        set { surfaceView.onFocus = newValue }
+    }
 
     init() {
         surfaceView = GhosttySurfaceView()
@@ -164,6 +168,7 @@ final class GhosttySurfaceView: NSView {
 
     var pendingConfig: TerminalSessionConfig?
     var onPwdChange: ((String) -> Void)?
+    var onFocus: (() -> Void)?
     private(set) var surface: ghostty_surface_t? {
         didSet {
             if surface != nil { propagateSizeToSurface() }
@@ -337,8 +342,9 @@ final class GhosttySurfaceView: NSView {
 
     override func becomeFirstResponder() -> Bool {
         let became = super.becomeFirstResponder()
-        if became, let surface {
-            ghostty_surface_set_focus(surface, true)
+        if became {
+            if let surface { ghostty_surface_set_focus(surface, true) }
+            onFocus?()
         }
         return became
     }
