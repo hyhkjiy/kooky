@@ -117,7 +117,7 @@ cat > "${APP}/Contents/Info.plist" <<PLIST
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.developer-tools</string>
     <key>LSMinimumSystemVersion</key>
-    <string>15.0</string>
+    <string>14.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSPrincipalClass</key>

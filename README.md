@@ -36,7 +36,7 @@ After the first launch, macOS remembers and won't ask again.
 
 ## Building from source
 
-Requires Xcode 26+ and macOS 15+.
+Requires Xcode 26+ and macOS 14+ (Sonoma — `@Observable` is the floor).
 
 ```sh
 # One-time: download the prebuilt GhosttyKit xcframework into Vendor/.
