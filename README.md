@@ -4,7 +4,9 @@
 
 🇬🇧 English  ·  🇨🇳 [中文](README_cn.md)
 
-Open-source · macOS-only · MIT. Vertical tabs, one-click AI agent sessions, GPU rendering via [libghostty](https://github.com/ghostty-org/ghostty).
+![kooky — sidebar with three workspaces, two panes running Claude Code and Codex side by side, agent activity dots](screenshot.webp)
+
+Existing terminals were built before AI agents lived in your dev loop. **kooky treats agent sessions as first-class tabs** — Claude Code, Codex, Gemini CLI live next to your shells, and the chrome reacts to what each is doing. Open-source, macOS-only, MIT. GPU rendering via [libghostty](https://github.com/ghostty-org/ghostty).
 
 **[Download latest](https://github.com/iAmCorey/kooky/releases/latest)**  ·  [Architecture notes](ARCHITECTURE.md)  ·  [Changelog](CHANGELOG.md)
 
@@ -20,9 +22,7 @@ Open-source · macOS-only · MIT. Vertical tabs, one-click AI agent sessions, GP
 
 **Full keyboard.** `⌘T` / `⌘N` new tab / workspace · `⌘W` / `⌘⇧W` close · `⌘1-9` / `⌥⌘1-9` switch · `⌘D` / `⌘⇧D` split right / down · `⌘[` `⌘]` focus pane · `⌘=` / `⌘-` / `⌘0` font size · `⌘K` clear pane.
 
-**Real macOS chrome.** Onest + JetBrains Mono. 32pt top strip with traffic lights and a window-drag handle that wins the title-bar-vs-tab-DnD race. Custom About panel, native menus with shortcut hints, IME for 中日韩 / Vietnamese / etc.
-
-**Local-only.** No cloud, no telemetry, no accounts. State lives in `~/Library/Application Support/kooky/`.
+**Real macOS chrome.** Onest + JetBrains Mono. 32pt top strip with traffic lights and a window-drag handle that wins the title-bar-vs-tab-DnD race. Custom About panel, native menus with shortcut hints, IME for 中日韩 / Vietnamese / etc. State lives in `~/Library/Application Support/kooky/`; no cloud, no telemetry, no accounts.
 
 ## Install
 

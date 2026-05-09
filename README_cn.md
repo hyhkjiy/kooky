@@ -4,7 +4,9 @@
 
 🇨🇳 中文  ·  🇬🇧 [English](README.md)
 
-开源 · 仅 macOS · MIT。Vertical tabs · 一键 AI agent 会话 · 基于 [libghostty](https://github.com/ghostty-org/ghostty) 的 GPU 渲染。
+![kooky 截图 —— sidebar 三个 workspace,两个 pane 并排跑 Claude Code 和 Codex,agent 活动点](screenshot.webp)
+
+现有终端都是在 AI agent 进入开发流程之前设计的。**kooky 把 agent 会话当作第一公民 tab** —— Claude Code / Codex / Gemini CLI 跟你的 shell 平等共存,chrome 实时反映每个 agent 在做什么。开源、仅 macOS、MIT。GPU 渲染基于 [libghostty](https://github.com/ghostty-org/ghostty)。
 
 **[下载最新版](https://github.com/iAmCorey/kooky/releases/latest)**  ·  [架构文档](ARCHITECTURE.md)  ·  [更新日志](CHANGELOG.md)
 
@@ -12,17 +14,15 @@
 
 ## 它做什么
 
-**vertical tabs,这次终于做对了。** Sidebar 列出 workspace,三态折叠(`⌘⌃S` 切换)。每个 pane 自带 tab 栏, 风格。tab 拖动重排,跨 pane 拖动整体迁移会话。状态跨重启持久化。
+**vertical tabs,认真做的那种。** Sidebar 列出 workspace,三态折叠(`⌘⌃S` 切换)。每个 pane 自带 tab 栏, 风格。tab 拖动重排,跨 pane 拖动整体迁移会话。状态跨重启持久化。
 
-**一键起 AI agent 会话。** Claude Code · Codex · Gemini CLI · OpenCode · Amp。从 `+` 菜单选一个 —— 你看到第一个 prompt 之前 agent 已经在跑了。Sidebar 圆点显示每个 agent 的 activity 状态(running / attention / idle)。
+**一键起 AI agent 会话。** Claude Code · Codex · Gemini CLI · OpenCode · Amp。从 `+` 菜单选一个 —— shell 还没把 prompt 打出来,agent 就已经启动好了。sidebar 圆点实时显示每个 agent 此刻在跑、等你回复、还是闲着。
 
 **知道你的 shell 干了啥。** OSC 133 / FinalTerm hooks 装在 ZDOTDIR wrapper 里,**不污染**你的 `~/.zshrc`。上一条命令失败时,tab + workspace 行出小红点;hover 看 `exit N · 12.4s`。`⌘↑` / `⌘↓` 在 scrollback 里跳上/下个 prompt。
 
 **全键盘操作。** `⌘T` / `⌘N` 新 tab / workspace · `⌘W` / `⌘⇧W` 关闭 · `⌘1-9` / `⌥⌘1-9` 切换 · `⌘D` / `⌘⇧D` 向右 / 向下分屏 · `⌘[` `⌘]` 焦点切换 · `⌘=` / `⌘-` / `⌘0` 字号 · `⌘K` 清屏。
 
-**真正的 macOS 外观。** Onest + JetBrains Mono 字体。32pt 顶部条带 traffic light + 显式 window drag handle(解决 title-bar 拖窗 vs tab DnD 抢手势的老毛病)。自定义 About 面板、原生菜单带快捷键提示、中日韩 / 越南文等 IME 支持。
-
-**完全本地。** 无云端、无遥测、无账号。状态全部存在 `~/Library/Application Support/kooky/`。
+**真正的 macOS 外观。** Onest + JetBrains Mono 字体。32pt 顶部条带 traffic light + 显式 window drag handle(解决 title-bar 拖窗 vs tab DnD 抢手势的老毛病)。自定义 About 面板、原生菜单带快捷键提示、中日韩 / 越南文等 IME 支持。状态全部存在 `~/Library/Application Support/kooky/`,无云端、无遥测、无账号。
 
 ## 安装
 
