@@ -20,7 +20,7 @@ A minimal macOS terminal built for AI coding. Sidebar workspaces; horizontal / v
 
 **Agent activity readout.** Sidebar dot tracks each agent in real time — running (blue), waiting on you (amber), idle (none). Tab + workspace dots also turn red when the last command exited non-zero; hover for `exit N · 12.4s`.
 
-**Live workspace state.** Pane status bar shows git branch + diff (`N files +X −Y`), Python venv, and Node version. Click the Node or branch pill to switch versions / branches without typing.
+**Live workspace state.** Pane status bar shows git branch + diff (`N files +X −Y`), Python venv, Node version, and active proxy (`https_proxy` / `http_proxy` / `all_proxy`). Auto-refreshes when an agent's Bash tool or another terminal switches branches. Click the Node or branch pill to switch versions / branches without typing; click the proxy pill to see and copy the full `name=value`.
 
 **SwiftUI-native, minimal chrome.** Onest + JetBrains Mono. Custom About panel, native menus with shortcut hints, full IME support.
 
@@ -76,7 +76,7 @@ Requires Xcode 26+ and macOS 14+ (Sonoma — `@Observable` is the floor).
 ./scripts/setup-libghostty.sh        # one-time: fetch the libghostty xcframework
 swift build
 swift run                            # dev mode
-swift test                           # 73 unit tests
+swift test                           # 86 unit tests
 
 ./scripts/build-app.sh               # writes dist/Kooky.app
 ./scripts/build-dmg.sh --build       # writes dist/Kooky-vX.Y.Z.dmg
