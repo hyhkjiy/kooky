@@ -6,15 +6,33 @@ struct ProjectEnvironment: Equatable {
     var pythonVenv: String?
     var nodeVersion: String?
     var nvmDirectory: String?
+    var proxy: ProxyInfo?
 
-    init(pythonVenv: String? = nil, nodeVersion: String? = nil, nvmDirectory: String? = nil) {
+    init(
+        pythonVenv: String? = nil,
+        nodeVersion: String? = nil,
+        nvmDirectory: String? = nil,
+        proxy: ProxyInfo? = nil
+    ) {
         self.pythonVenv = pythonVenv
         self.nodeVersion = nodeVersion
         self.nvmDirectory = nvmDirectory
+        self.proxy = proxy
     }
 
     static let empty = ProjectEnvironment()
-    var isEmpty: Bool { pythonVenv == nil && nodeVersion == nil }
+    var isEmpty: Bool { pythonVenv == nil && nodeVersion == nil && proxy == nil }
+}
+
+/// Shell-level proxy configuration. `summary` is the compact `host:port` for
+/// the status-bar pill (taken from the highest-priority non-empty proxy var,
+/// in the order `https_proxy` → `http_proxy` → `all_proxy`). `entries`
+/// preserves the full original `name=value` strings — surfaced in the
+/// click-to-open popover so users can see which scheme/credentials each tool
+/// would actually pick up.
+struct ProxyInfo: Equatable {
+    let summary: String
+    let entries: [String]
 }
 
 /// Extracts status-bar env from a shell env snapshot, then falls back to
@@ -32,8 +50,45 @@ enum EnvironmentDetector {
         ProjectEnvironment(
             pythonVenv: detectPythonVenv(shellEnv: shellEnv, cwd: cwd, allowProjectFallback: allowProjectFallback),
             nodeVersion: detectNodeVersion(shellEnv: shellEnv, cwd: cwd, allowProjectFallback: allowProjectFallback),
-            nvmDirectory: normalizedNonEmpty(shellEnv["NVM_DIR"])
+            nvmDirectory: normalizedNonEmpty(shellEnv["NVM_DIR"]),
+            proxy: detectProxy(shellEnv: shellEnv)
         )
+    }
+
+    /// Inspects the three common shell-proxy vars. Order is `https_proxy`
+    /// first (the var most tools actually consult — HTTPS dominates modern
+    /// traffic), then `http_proxy`, then `all_proxy` (covers socks5 setups).
+    /// `summary` parses `host:port` out of whichever wins; `entries` keeps
+    /// the raw `name=value` for every non-empty var so the popover can show
+    /// the full picture.
+    private static func detectProxy(shellEnv: [String: String]) -> ProxyInfo? {
+        let names = ["https_proxy", "http_proxy", "all_proxy"]
+        let pairs = names.compactMap { name -> (name: String, value: String)? in
+            guard let value = normalizedNonEmpty(shellEnv[name]) else { return nil }
+            return (name, value)
+        }
+        guard !pairs.isEmpty else { return nil }
+        let summary = pairs.lazy.compactMap { parseHostPort($0.value) }.first ?? pairs[0].value
+        return ProxyInfo(summary: summary, entries: pairs.map { "\($0.name)=\($0.value)" })
+    }
+
+    /// Strips scheme + credentials from a proxy URL, returning `host:port`.
+    /// Wraps IPv6 hosts in brackets — macOS URLComponents keeps the brackets
+    /// for v6 hosts already; normalize first to avoid `[[::1]]`.
+    fileprivate static func parseHostPort(_ raw: String) -> String? {
+        let normalized = raw.contains("://") ? raw : "http://" + raw
+        guard let components = URLComponents(string: normalized),
+              let host = components.host, !host.isEmpty else {
+            return nil
+        }
+        let unwrapped = host.hasPrefix("[") && host.hasSuffix("]")
+            ? String(host.dropFirst().dropLast())
+            : host
+        let displayHost = unwrapped.contains(":") ? "[\(unwrapped)]" : unwrapped
+        if let port = components.port {
+            return "\(displayHost):\(port)"
+        }
+        return displayHost
     }
 
     /// `VIRTUAL_ENV` is the standard env var venv / virtualenv writes when

@@ -122,6 +122,12 @@ final class HookServer {
         handler(message)
     }
 
+    private static let envKeys = [
+        "VIRTUAL_ENV", "CONDA_DEFAULT_ENV",
+        "NVM_BIN", "NVM_DIR", "KOOKY_NODE_VERSION",
+        "https_proxy", "http_proxy", "all_proxy",
+    ]
+
     static func parseMessage(_ data: Data) -> HookMessage? {
         guard
             let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -130,7 +136,6 @@ final class HookServer {
         else { return nil }
 
         if dict["kind"] as? String == "env" {
-            let envKeys = ["VIRTUAL_ENV", "CONDA_DEFAULT_ENV", "NVM_BIN", "NVM_DIR", "KOOKY_NODE_VERSION"]
             let env = Dictionary(uniqueKeysWithValues: envKeys.map { key in
                 (key, dict[key] as? String ?? "")
             })

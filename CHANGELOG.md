@@ -2,6 +2,13 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.9.4 — 2026-05-11
+
+- **Status bar git state auto-refreshes during agent sessions.** Switching branches via Claude / Gemini / Codex's Bash tool — or from an external terminal — now updates the pane status bar within ~200ms. Previously the bar only refreshed on shell `cd` (OSC 7) or shell-command finish (OSC 133;D); agent subprocess shells trip neither. New per-session `GitWatcher` opens kqueue sources on `.git/HEAD` and `.git/index`; handles git's atomic-rename pattern (NOTE_DELETE → reopen) and stale-cwd rebuilds. Submodule `.git` files with relative `gitdir:` paths resolve against the file's own directory instead of the process cwd.
+- **Proxy slot in the status bar.** When `https_proxy` / `http_proxy` / `all_proxy` (or their uppercase forms) are set, a new `network` pill shows `host:port` from the highest-priority value. Click it to see all set proxy vars in full (`name=value`); each row click-copies to the system pasteboard. Credentials in summary are stripped — full form stays in the popover. IPv6 hosts bracket-wrap. New `ProxyInfo` struct on `ProjectEnvironment`; envStatusBlock hook tracks the 3 vars; `KookyHook env` mode accepts 3 more args.
+- **Tab icon promotes on manually-launched agents.** *(Folded in from v0.9.3.)* Type `claude` / `gemini` in a Terminal tab → tab pill + sidebar dot switch to the agent immediately, not just when picked from the `+` menu. SessionEnd reverts to `.terminal`. `applyHookEvent` guards `session.activityState` writes — same-value assignments no longer churn `@Observable` observers.
+- **About panel rewrite.** Bottom line is now `Built by Corey Chiu with ❤️`; "Corey Chiu" links to coreychiu.com. Dropped the © + MIT line — license info lives in README / NOTICE.md.
+
 ## v0.9.3 — 2026-05-11
 
 - **Tab icon promotes on manually-launched agents.** Open a regular Terminal tab, type `claude` (or `gemini` / `codex` / `opencode` / `amp`) — the tab pill + sidebar dot now switch to the agent's icon immediately, not just when the agent was picked from the `+` menu. Added `SessionStart` → `.running` to the Claude Code + Gemini CLI hooks JSON; the bracket-wrapper agents (codex / opencode / amp) already promoted via their wrapper's `running` ping. SessionEnd is unchanged: quitting the agent reverts the tab to `.terminal`.

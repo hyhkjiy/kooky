@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Recursive view for a workspace's split tree. Leaves render their own tab
@@ -78,8 +79,9 @@ private struct PaneStatusBar: View {
         HStack(spacing: 0) {
             Spacer(minLength: 0)
             ViewThatFits(in: .horizontal) {
-                segmentRow([pythonSegment, nodeSegment, branchSegment, diffSegment])
-                segmentRow([nodeSegment, branchSegment, diffSegment])
+                segmentRow([pythonSegment, nodeSegment, proxySegment, branchSegment, diffSegment])
+                segmentRow([nodeSegment, proxySegment, branchSegment, diffSegment])
+                segmentRow([proxySegment, branchSegment, diffSegment])
                 segmentRow([branchSegment, diffSegment])
                 segmentRow([diffSegment])
                 segmentRow([branchSegment])
@@ -118,6 +120,11 @@ private struct PaneStatusBar: View {
             commandFor: NodeVersionInventory.shellUseCommand,
             session: session
         ))
+    }
+
+    private var proxySegment: AnyView {
+        guard let info = session.environment.proxy else { return AnyView(EmptyView()) }
+        return AnyView(ProxyStatusSegment(info: info))
     }
 
     private var branchSegment: AnyView {
@@ -263,6 +270,48 @@ private struct SwitchableStatusSegment<Item: Hashable>: View {
                             isSwitcherOpen = false
                             session.engine.sendInput(commandFor(item))
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Each row click-copies the `name=value` to the pasteboard. No PTY
+/// injection: `unset` semantics differ per shell and across already-launched
+/// child processes, so kooky doesn't pretend to switch proxies for you.
+private struct ProxyStatusSegment: View {
+    let info: ProxyInfo
+
+    @State private var isPopoverOpen = false
+    @State private var isHovered = false
+
+    var body: some View {
+        Button {
+            isPopoverOpen.toggle()
+        } label: {
+            StatusSegment(systemImage: "network") {
+                Text(info.summary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .foregroundStyle(Theme.chromeForeground)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(isHovered || isPopoverOpen ? Theme.chromeHover : .clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .contentShape(RoundedRectangle(cornerRadius: 4))
+        .help("Show proxy env (click row to copy)")
+        .onHover { isHovered = $0 }
+        .popover(isPresented: $isPopoverOpen, arrowEdge: .bottom) {
+            KookyMenuList(width: 320, maxHeight: 200) {
+                ForEach(info.entries, id: \.self) { entry in
+                    KookyMenuRow(title: entry) {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(entry, forType: .string)
+                        isPopoverOpen = false
                     }
                 }
             }

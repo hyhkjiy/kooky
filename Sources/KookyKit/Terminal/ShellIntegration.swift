@@ -419,13 +419,19 @@ enum KookyShellIntegration {
                 [[ -n "$_kooky_node_path" ]] && _KOOKY_NODE_VERSION_LAST="$("$_kooky_node_path" --version 2>/dev/null)"
                 _KOOKY_NODE_KEY_LAST="$_kooky_node_key"
             fi
-            local _kooky_env_now="${VIRTUAL_ENV:-}|${CONDA_DEFAULT_ENV:-}|${NVM_BIN:-}|${NVM_DIR:-}|$_KOOKY_NODE_VERSION_LAST"
+            # Accept both lowercase and uppercase forms — curl / git / requests
+            # respect lowercase; some tools (and many corp setups) export
+            # uppercase only. Fall through to uppercase when lowercase is unset.
+            local _kooky_https_proxy="${https_proxy:-${HTTPS_PROXY:-}}"
+            local _kooky_http_proxy="${http_proxy:-${HTTP_PROXY:-}}"
+            local _kooky_all_proxy="${all_proxy:-${ALL_PROXY:-}}"
+            local _kooky_env_now="${VIRTUAL_ENV:-}|${CONDA_DEFAULT_ENV:-}|${NVM_BIN:-}|${NVM_DIR:-}|$_KOOKY_NODE_VERSION_LAST|$_kooky_https_proxy|$_kooky_http_proxy|$_kooky_all_proxy"
             [[ "$_kooky_env_now" == "$_KOOKY_ENV_LAST" ]] && return 0
             # Only advance the dedup cache when the IPC actually succeeded —
             # if kooky-hook returns non-zero (kooky restarting, socket gone
             # before the hook server bound), the next prompt will retry
             # instead of staying frozen at the unsent value.
-            "$KOOKY_HOOK_BIN" env "${VIRTUAL_ENV:-}" "${CONDA_DEFAULT_ENV:-}" "${NVM_BIN:-}" "${NVM_DIR:-}" "$_KOOKY_NODE_VERSION_LAST" 2>/dev/null \
+            "$KOOKY_HOOK_BIN" env "${VIRTUAL_ENV:-}" "${CONDA_DEFAULT_ENV:-}" "${NVM_BIN:-}" "${NVM_DIR:-}" "$_KOOKY_NODE_VERSION_LAST" "$_kooky_https_proxy" "$_kooky_http_proxy" "$_kooky_all_proxy" 2>/dev/null \
                 && _KOOKY_ENV_LAST="$_kooky_env_now"
             # Mask our internal IPC status so user precmd hooks downstream in
             # zsh's precmd_functions chain don't see `$?=1` and bleed it into

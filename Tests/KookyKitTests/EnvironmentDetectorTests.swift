@@ -178,4 +178,83 @@ final class EnvironmentDetectorTests: XCTestCase {
         XCTAssertTrue(NodeVersionInventory.isSameVersion("20.10.0", "v20.10.0"))
         XCTAssertFalse(NodeVersionInventory.isSameVersion("20.10.0", "v20.11.0"))
     }
+
+    // MARK: - Proxy
+
+    func testProxyAbsentWhenAllVarsEmpty() {
+        let env = EnvironmentDetector.extract(
+            shellEnv: ["https_proxy": "", "http_proxy": "", "all_proxy": ""],
+            cwd: tempDir,
+            allowProjectFallback: false
+        )
+        XCTAssertNil(env.proxy)
+    }
+
+    func testProxyExtractsHostPortFromHttpsProxy() {
+        let env = EnvironmentDetector.extract(
+            shellEnv: ["https_proxy": "http://127.0.0.1:61271"],
+            cwd: tempDir,
+            allowProjectFallback: false
+        )
+        XCTAssertEqual(env.proxy?.summary, "127.0.0.1:61271")
+        XCTAssertEqual(env.proxy?.entries, ["https_proxy=http://127.0.0.1:61271"])
+    }
+
+    func testProxyHttpsPriorityOverHttpAndAll() {
+        let env = EnvironmentDetector.extract(
+            shellEnv: [
+                "https_proxy": "http://10.0.0.1:8080",
+                "http_proxy": "http://127.0.0.1:7070",
+                "all_proxy": "socks5://127.0.0.1:1080",
+            ],
+            cwd: tempDir,
+            allowProjectFallback: false
+        )
+        XCTAssertEqual(env.proxy?.summary, "10.0.0.1:8080")
+        XCTAssertEqual(env.proxy?.entries, [
+            "https_proxy=http://10.0.0.1:8080",
+            "http_proxy=http://127.0.0.1:7070",
+            "all_proxy=socks5://127.0.0.1:1080",
+        ])
+    }
+
+    func testProxyFallsBackToAllProxyWhenHttpsAndHttpEmpty() {
+        let env = EnvironmentDetector.extract(
+            shellEnv: ["all_proxy": "socks5://corp.proxy:1080"],
+            cwd: tempDir,
+            allowProjectFallback: false
+        )
+        XCTAssertEqual(env.proxy?.summary, "corp.proxy:1080")
+        XCTAssertEqual(env.proxy?.entries, ["all_proxy=socks5://corp.proxy:1080"])
+    }
+
+    func testProxyStripsCredentialsFromSummary() {
+        let env = EnvironmentDetector.extract(
+            shellEnv: ["https_proxy": "http://user:pass@proxy.corp:8443"],
+            cwd: tempDir,
+            allowProjectFallback: false
+        )
+        // Summary is user-visible — never include creds. Full string with
+        // creds remains in `entries` (popover) for the user to inspect.
+        XCTAssertEqual(env.proxy?.summary, "proxy.corp:8443")
+        XCTAssertEqual(env.proxy?.entries, ["https_proxy=http://user:pass@proxy.corp:8443"])
+    }
+
+    func testProxySchemelessValueIsAcceptable() {
+        let env = EnvironmentDetector.extract(
+            shellEnv: ["http_proxy": "127.0.0.1:3128"],
+            cwd: tempDir,
+            allowProjectFallback: false
+        )
+        XCTAssertEqual(env.proxy?.summary, "127.0.0.1:3128")
+    }
+
+    func testProxyIPv6HostIsBracketed() {
+        let env = EnvironmentDetector.extract(
+            shellEnv: ["https_proxy": "http://[::1]:8080"],
+            cwd: tempDir,
+            allowProjectFallback: false
+        )
+        XCTAssertEqual(env.proxy?.summary, "[::1]:8080")
+    }
 }

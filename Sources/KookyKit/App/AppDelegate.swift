@@ -400,14 +400,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
                 .paragraphStyle: centered,
             ]
         ))
+        let footnoteFont = NSFont.systemFont(ofSize: 9)
+        let footnoteBase: [NSAttributedString.Key: Any] = [
+            .font: footnoteFont,
+            .foregroundColor: NSColor.secondaryLabelColor,
+            .paragraphStyle: centered,
+        ]
+        credits.append(NSAttributedString(string: "\n\nBuilt by ", attributes: footnoteBase))
         credits.append(NSAttributedString(
-            string: "\n\n\(KookyApp.copyrightLine)",
+            string: KookyApp.author,
             attributes: [
-                .font: NSFont.systemFont(ofSize: 9),
-                .foregroundColor: NSColor.secondaryLabelColor,
+                .font: footnoteFont,
+                .foregroundColor: NSColor.linkColor,
+                .link: KookyApp.authorURL,
                 .paragraphStyle: centered,
             ]
         ))
+        credits.append(NSAttributedString(string: " with ❤️", attributes: footnoteBase))
         return credits
     }
 

@@ -5,11 +5,10 @@ import Foundation
 /// About panel matches the latest CHANGELOG `vX.Y` tag.
 enum KookyApp {
     static let name = "kooky"
-    static let displayVersion = "0.9.3"
+    static let displayVersion = "0.9.4"
     static let tagline = "A terminal built for the coding experience."
     static let author = "Corey Chiu"
-    static let copyrightYear = "2026"
-    static let license = "MIT"
+    static let authorURL = URL(string: "https://coreychiu.com")!
 
     static let repositoryURL = URL(string: "https://github.com/iAmCorey/kooky")!
     static let issuesURL = URL(string: "https://github.com/iAmCorey/kooky/issues")!
@@ -18,9 +17,5 @@ enum KookyApp {
     /// URL change can't desync the user-visible string.
     static var repositoryDisplay: String {
         (repositoryURL.host ?? "") + repositoryURL.path
-    }
-
-    static var copyrightLine: String {
-        "© \(copyrightYear) \(author) — \(license) licensed"
     }
 }

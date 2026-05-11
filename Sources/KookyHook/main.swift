@@ -17,7 +17,7 @@ import Foundation
 // Usage: kooky-hook <agent> <event>
 //   <agent> ∈ claude | codex (or any AgentTemplate.id)
 //   <event> ∈ running | attention | idle
-// Usage: kooky-hook env <VIRTUAL_ENV> <CONDA_DEFAULT_ENV> <NVM_BIN> <NVM_DIR> <NODE_VERSION>
+// Usage: kooky-hook env <VIRTUAL_ENV> <CONDA_DEFAULT_ENV> <NVM_BIN> <NVM_DIR> <NODE_VERSION> <https_proxy> <http_proxy> <all_proxy>
 // Reads:  $KOOKY_SURFACE_ID       UUID of the originating session
 // Reads:  any stdin               drained but ignored (Claude pipes JSON in)
 
@@ -41,6 +41,9 @@ if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "env" {
         "NVM_BIN": arg(4),
         "NVM_DIR": arg(5),
         "KOOKY_NODE_VERSION": arg(6),
+        "https_proxy": arg(7),
+        "http_proxy": arg(8),
+        "all_proxy": arg(9),
     ]
 } else if CommandLine.arguments.count >= 3 {
     payloadObject = [

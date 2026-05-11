@@ -62,6 +62,12 @@ final class WorkspaceStore {
     private let engineFactory: @MainActor () -> any TerminalEngine
     private let persistence: any Persistence
     private let gitStatusFetcher = GitStatusFetcher()
+    /// One watcher per session — refreshes git status when `.git/HEAD` or
+    /// `.git/index` changes from any source (agent subprocess, external
+    /// terminal, file-level git ops). The OSC 7 / OSC 133 paths only see
+    /// the outer shell, so an agent running its own subprocess shell never
+    /// trips them; the filesystem layer catches everyone.
+    private var gitWatchers: [UUID: GitWatcher] = [:]
 
     /// Snapshot of a closed tab's reopenable state. Workspace + pane IDs
     /// are best-effort routing — if either is gone by the time the user
@@ -123,7 +129,10 @@ final class WorkspaceStore {
 
     func closeWorkspace(_ workspace: Workspace) {
         for pane in workspace.root.allPanes {
-            for tab in pane.tabs { tab.engine.terminate() }
+            for tab in pane.tabs {
+                gitWatchers.removeValue(forKey: tab.id)?.cancel()
+                tab.engine.terminate()
+            }
         }
         guard let idx = workspaces.firstIndex(where: { $0.id == workspace.id }) else { return }
         workspaces.remove(at: idx)
@@ -287,6 +296,7 @@ final class WorkspaceStore {
         guard let pane = pane(containing: session, in: workspace),
               let idx = pane.tabs.firstIndex(where: { $0.id == session.id }) else { return }
         recordClosedTab(session, pane: pane, workspace: workspace)
+        gitWatchers.removeValue(forKey: session.id)?.cancel()
         session.engine.terminate()
         pane.tabs.remove(at: idx)
         if pane.tabs.isEmpty {
@@ -571,6 +581,7 @@ final class WorkspaceStore {
         // results for non-applicable cwds, so the calls are harmless.
         refreshGitStatus(for: session)
         refreshEnvironment(for: session)
+        installGitWatcher(for: session)
         engine.onPwdChange = { [weak self, weak session, weak workspace] pwd in
             guard let session else { return }
             let url = URL(fileURLWithPath: pwd)
@@ -582,6 +593,7 @@ final class WorkspaceStore {
             }
             self?.refreshGitStatus(for: session)
             self?.refreshEnvironment(for: session)
+            self?.gitWatchers[session.id]?.watch(cwd: session.currentDirectory)
             self?.scheduleSave()
         }
         engine.onFocus = { [weak self, weak session, weak workspace] in
@@ -631,6 +643,15 @@ final class WorkspaceStore {
             guard let session, session.gitStatus != status else { return }
             session.gitStatus = status
         }
+    }
+
+    private func installGitWatcher(for session: Session) {
+        let watcher = GitWatcher { [weak self, weak session] in
+            guard let self, let session else { return }
+            self.refreshGitStatus(for: session)
+        }
+        watcher.watch(cwd: session.currentDirectory)
+        gitWatchers[session.id] = watcher
     }
 
     private func refreshEnvironment(for session: Session) {
