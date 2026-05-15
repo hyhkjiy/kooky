@@ -471,7 +471,15 @@ final class WorkspaceStore {
         guard let session = findSession(id: sessionId) else { return }
         let agentBefore = session.agent.id
         if event == .ended {
-            if session.agent.id == agent.id { session.agent = .terminal }
+            // A custom agent based on this builtin shares its binary's
+            // wrapper shim — the `ended` ping arrives with the builtin's
+            // slug, not the custom's id. Match on the template's
+            // baseAgentId snapshot (frozen at spawn time, see
+            // `AgentTemplate.baseAgentId`) so a mid-run Settings edit
+            // can't leave the tab pill stuck.
+            if session.agent.id == agent.id || session.agent.baseAgentId == agent.id {
+                session.agent = .terminal
+            }
         } else if session.agent.id == AgentTemplate.terminal.id {
             session.agent = agent
         }

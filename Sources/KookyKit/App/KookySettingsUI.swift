@@ -80,6 +80,8 @@ final class KookySettingsModel {
                 id: id,
                 title: (dict["title"] as? String) ?? "",
                 command: (dict["command"] as? String) ?? "",
+                baseAgentId: (dict["baseAgentId"] as? String) ?? "",
+                iconAsset: (dict["iconAsset"] as? String) ?? "",
                 symbol: (dict["symbol"] as? String) ?? "",
                 tintHex: (dict["tintHex"] as? String) ?? ""
             )
@@ -121,6 +123,8 @@ final class KookySettingsModel {
             var dict: [String: Any] = ["id": c.id]
             if !c.title.isEmpty { dict["title"] = c.title }
             if !c.command.isEmpty { dict["command"] = c.command }
+            if !c.baseAgentId.isEmpty { dict["baseAgentId"] = c.baseAgentId }
+            if !c.iconAsset.isEmpty { dict["iconAsset"] = c.iconAsset }
             if !c.symbol.isEmpty { dict["symbol"] = c.symbol }
             if !c.tintHex.isEmpty { dict["tintHex"] = c.tintHex }
             return dict
@@ -505,6 +509,7 @@ private struct AgentReorderList: View {
                     ),
                     title: customBinding(id: template.id, \.title),
                     command: customBinding(id: template.id, \.command),
+                    baseAgentId: customBinding(id: template.id, \.baseAgentId),
                     onToggleVisible: { toggle(template.id) },
                     onToggleExpanded: {
                         expandedId = expandedId == template.id ? nil : template.id
@@ -639,6 +644,9 @@ private struct AgentRow: View {
     @Binding var title: String
     /// Launch-command binding — same scoping rule as `title`.
     @Binding var command: String
+    /// `baseAgentId` binding — same scoping rule as `title`/`command`. Empty
+    /// string = no base (generic icon + no wrapper inheritance).
+    @Binding var baseAgentId: String
     let onToggleVisible: () -> Void
     let onToggleExpanded: () -> Void
     let onBeginDrag: () -> Void
@@ -691,8 +699,11 @@ private struct AgentRow: View {
     private var expandedForm: some View {
         VStack(alignment: .leading, spacing: 6) {
             if isCustom {
+                basedOnRow
                 editRow(label: "title", placeholder: "My Agent", text: $title)
-                editRow(label: "command", placeholder: "aichat --model gpt-4", text: $command)
+                if baseAgentId.isEmpty {
+                    editRow(label: "command", placeholder: "aichat --model gpt-4", text: $command)
+                }
             }
             editRow(label: "options", placeholder: "--model opus", text: $options)
             if isCustom {
@@ -714,6 +725,35 @@ private struct AgentRow: View {
         .padding(.top, 2)
         .padding(.bottom, 12)
         .id(template.id)
+    }
+
+    /// "based on" picker — inherits icon / tint / wrapper / launch binary
+    /// from the chosen builtin. Empty = generic SF Symbol fallback,
+    /// no wrapper-fired lifecycle, `command` field required.
+    /// Switching to a non-empty base clears `command` so a stale override
+    /// can't silently win over the base's binary.
+    private var basedOnRow: some View {
+        HStack(spacing: 10) {
+            Text("based on")
+                .font(Theme.mono(11))
+                .foregroundStyle(Theme.chromeMuted)
+                .frame(width: 50, alignment: .leading)
+            Picker("", selection: $baseAgentId) {
+                Text("(none)").tag("")
+                Divider()
+                ForEach(AgentTemplate.builtin.filter { $0.id != "terminal" }) { template in
+                    Text(template.title).tag(template.id)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(minWidth: 160)
+            .onChange(of: baseAgentId) { _, new in
+                if !new.isEmpty { command = "" }
+            }
+        }
+        .padding(.leading, Self.optionsRowIndent)
+        .padding(.trailing, 22)
     }
 
     private func editRow(label: String, placeholder: String, text: Binding<String>) -> some View {

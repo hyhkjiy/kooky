@@ -2,6 +2,16 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.10.6 — 2026-05-15
+
+- **Custom agents can now "inherit" from a builtin.** Each custom agent's edit form gains a `based on` picker. Pick **Claude Code** and your custom (e.g. "Claude Opus") gets:
+  - Claude's orange sparkle icon + brand tint in the sidebar
+  - The wrapper-fired lifecycle pings for free — sidebar dot tracks `running` / idle, tab pill reverts to Terminal cleanly when the agent exits
+  - The base's launch binary — when a base is picked, the `command` field disappears entirely. You only configure `options` (e.g. `--model opus`) and kooky uses the base's binary (`claude`) automatically. Switching to (none) brings the `command` field back.
+
+  Pick **(none)** to keep the fully custom behaviour: generic `wand.and.stars` icon, no lifecycle tracking, `command` is required (suitable for one-shot scripts like `aichat`). Persists as `agents.custom[].baseAgentId` in settings.json.
+- **Wrapper-end fix for based-on customs.** Without this release, a custom-based-on-Claude tab would never revert its icon to Terminal after the agent exited — the wrapper's `ended` ping arrived with the builtin slug (`claude`), but the session's agent id was the custom one (`claude-opus`), so `applyHookEvent` skipped the revert. Fixed by snapshotting `baseAgentId` onto the live `AgentTemplate` when `fromCustom` materialises a custom, then matching on `session.agent.baseAgentId` on `ended`. The snapshot lives on the template (not on the settings table) so a mid-run edit / delete in Settings → Coding Agents can't strand the session — whatever was true when you launched the tab stays true until it exits.
+
 ## v0.10.5 — 2026-05-15
 
 - **Define your own agent.** New `+ add custom agent` button at the bottom of Settings → Coding Agents lets you wire any CLI as a first-class kooky agent: type a title and a launch command (`aichat`, `mistral-cli --model 7b`, `~/scripts/my-helper.sh`, anything), and it shows up in the `+` menu alongside Claude Code / Copilot / etc. Custom agents are full citizens — drag to reorder, hide / show, set per-agent options, pick as default, the works. Icon uses a generic SF Symbol (`wand.and.stars`) so you don't have to deal with image uploads. Delete from the same expanded row. Persists under `agents.custom` in `~/.kooky/settings.json`; advanced users can hand-edit `symbol` and `tintHex` there if they want a different fallback glyph or pip color.

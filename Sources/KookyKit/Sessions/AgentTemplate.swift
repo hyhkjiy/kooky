@@ -21,6 +21,32 @@ struct AgentTemplate: Identifiable, Hashable {
     /// the same family of marks shown elsewhere. sRGB hex.
     let tintHex: String?
     let initialCommand: String?
+    /// For custom templates only — snapshot of `CustomAgentData.baseAgentId`
+    /// taken at `fromCustom` time. Nil for builtins. Lives on the template
+    /// (not on Session) because the wrapper-end revert in `applyHookEvent`
+    /// must use the value present when the session *started*, not whatever
+    /// the user has since changed in Settings → Coding Agents (a mid-run
+    /// edit/delete would otherwise leave the tab stuck in the custom-agent
+    /// state forever).
+    let baseAgentId: String?
+
+    init(
+        id: String,
+        title: String,
+        symbol: String,
+        iconAsset: String?,
+        tintHex: String?,
+        initialCommand: String?,
+        baseAgentId: String? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.symbol = symbol
+        self.iconAsset = iconAsset
+        self.tintHex = tintHex
+        self.initialCommand = initialCommand
+        self.baseAgentId = baseAgentId
+    }
 
     var tint: Color? {
         tintHex.flatMap(Color.init(hex:))
@@ -196,16 +222,23 @@ extension AgentTemplate {
     }
 
     /// Materialises a user-defined custom agent into a runtime `AgentTemplate`.
-    /// `iconAsset` stays nil — v1 only supports SF Symbol fallbacks for custom
-    /// agents, not bundled PNGs.
+    /// When `baseAgentId` matches a builtin, the custom inherits that
+    /// builtin's `iconAsset` / `symbol` / `tintHex` *and* its `initialCommand`
+    /// when the user's own `command` is blank — so picking "Claude Code" as
+    /// the base and leaving `command` empty launches the base's binary
+    /// (`claude`) with the custom's options appended (`--model opus`). A
+    /// `(none)` base with empty command stays nil so the `+` menu filter
+    /// skips half-configured customs.
     static func fromCustom(_ data: CustomAgentData) -> AgentTemplate {
-        AgentTemplate(
+        let base = builtin.first { $0.id == data.baseAgentId }
+        return AgentTemplate(
             id: data.id,
             title: data.title.isEmpty ? data.id : data.title,
-            symbol: data.symbol.isEmpty ? "wand.and.stars" : data.symbol,
-            iconAsset: nil,
-            tintHex: data.tintHex.isEmpty ? nil : data.tintHex,
-            initialCommand: data.command.isEmpty ? nil : data.command
+            symbol: data.symbol.isEmpty ? (base?.symbol ?? "wand.and.stars") : data.symbol,
+            iconAsset: data.iconAsset.isEmpty ? base?.iconAsset : data.iconAsset,
+            tintHex: data.tintHex.isEmpty ? base?.tintHex : data.tintHex,
+            initialCommand: data.command.isEmpty ? base?.initialCommand : data.command,
+            baseAgentId: data.baseAgentId.isEmpty ? nil : data.baseAgentId
         )
     }
 }
@@ -221,15 +254,37 @@ struct CustomAgentData: Hashable, Identifiable {
     /// Full launch command, e.g. `aichat --model gpt-4o`. Whitespace-split
     /// by the wrapper's `eval`, same as the `agents.options` field.
     var command: String
-    /// SF Symbol fallback. Falls back to `wand.and.stars` if user typoed.
+    /// `id` of a builtin agent whose icon / tint / SF Symbol the custom
+    /// should inherit. Empty = no inheritance (generic `wand.and.stars` +
+    /// no tint). Surfaced as the "based on" picker in Settings so a user
+    /// can build "Claude Opus" variants that visually belong to the Claude
+    /// family without touching iconAsset / tintHex directly.
+    var baseAgentId: String
+    /// Bundled PNG asset name (matches files in `Resources/Icons/`). Power-
+    /// user override; UI doesn't expose this in v1. Empty falls back to
+    /// the `baseAgentId` builtin's iconAsset, or nil if no base.
+    var iconAsset: String
+    /// SF Symbol override. Power-user; UI hides this. Empty falls back to
+    /// the base's symbol, then to `wand.and.stars`.
     var symbol: String
-    /// Optional sRGB hex (no `#`) for the sidebar pip tint. Empty = no tint.
+    /// sRGB hex (no `#`) for the sidebar pip tint. Power-user; UI hides
+    /// this. Empty falls back to base's tintHex, then nil.
     var tintHex: String
 
-    init(id: String, title: String = "", command: String = "", symbol: String = "wand.and.stars", tintHex: String = "") {
+    init(
+        id: String,
+        title: String = "",
+        command: String = "",
+        baseAgentId: String = "",
+        iconAsset: String = "",
+        symbol: String = "",
+        tintHex: String = ""
+    ) {
         self.id = id
         self.title = title
         self.command = command
+        self.baseAgentId = baseAgentId
+        self.iconAsset = iconAsset
         self.symbol = symbol
         self.tintHex = tintHex
     }

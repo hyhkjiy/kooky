@@ -39,4 +39,20 @@ final class AgentTemplateTests: XCTestCase {
             )
         }
     }
+
+    func testBuiltinTemplatesHaveNoBaseAgentId() {
+        for template in AgentTemplate.builtin {
+            XCTAssertNil(template.baseAgentId, "builtin \(template.id) must not declare a base")
+        }
+    }
+
+    func testFromCustomSnapshotsBaseAgentId() {
+        let data = CustomAgentData(id: "claude-opus", baseAgentId: "claude-code")
+        XCTAssertEqual(AgentTemplate.fromCustom(data).baseAgentId, "claude-code")
+    }
+
+    func testFromCustomTreatsEmptyBaseAsNil() {
+        let data = CustomAgentData(id: "loose-custom", command: "aichat")
+        XCTAssertNil(AgentTemplate.fromCustom(data).baseAgentId)
+    }
 }
