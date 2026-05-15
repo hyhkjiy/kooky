@@ -4,7 +4,7 @@
 
 🇬🇧 English  ·  🇨🇳 [中文](README_CN.md)
 
-![kooky — sidebar with three workspaces, two panes running Claude Code and Codex side by side, the `+` menu showing the six built-in agent templates](screenshot.png)
+![kooky — sidebar with three workspaces, two panes running Claude Code and Codex side by side, the `+` menu showing the seven built-in agent templates](screenshot.png)
 
 A minimal modern terminal built for AI coding. Sidebar workspaces; horizontal / vertical split panes; one-click agent launch; per-agent activity readout; live workspace state with one-click Node and branch switching. Open-source, MIT-licensed. No accounts, no telemetry; app state stays local. GPU rendering via [libghostty](https://github.com/ghostty-org/ghostty).
 
@@ -16,7 +16,7 @@ A minimal modern terminal built for AI coding. Sidebar workspaces; horizontal / 
 
 **Vertical tabs & split panes.** Sidebar workspaces with three-state collapse (`⌘⌃S`). Each pane owns its own tab strip and active tab. Drag tabs to reorder, or across panes to move sessions whole. State persists across launches.
 
-**One-click AI agent sessions.** Claude Code · Codex · Gemini CLI · OpenCode · Amp · Cursor CLI. Pick one from the `+` menu; the agent boots before your first prompt prints.
+**One-click AI agent sessions.** Claude Code · Codex · Gemini CLI · OpenCode · Amp · Cursor CLI · GitHub Copilot. Pick one from the `+` menu; the agent boots before your first prompt prints.
 
 **Agent activity readout.** Sidebar dot tracks each agent in real time — running (blue), waiting on you (amber), idle (none). Tab + workspace dots also turn red when the last command exited non-zero; hover for `exit N · 12.4s`.
 

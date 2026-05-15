@@ -19,7 +19,7 @@ upstream license; nothing here is dual-licensed under kooky's MIT.
 ### lobe-icons (brand PNGs)
 - Source: <https://github.com/lobehub/lobe-icons>
 - License: MIT
-- Files: `Sources/KookyKit/Resources/Icons/{claudecode,codex,gemini,opencode,amp,cursor}.png`
+- Files: `Sources/KookyKit/Resources/Icons/{claudecode,codex,gemini,opencode,amp,cursor,githubcopilot}.png`
 
 ## Pulled at build time
 

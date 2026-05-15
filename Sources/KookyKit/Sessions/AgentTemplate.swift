@@ -121,7 +121,16 @@ extension AgentTemplate {
         initialCommand: "cursor-agent"
     )
 
-    static let all: [AgentTemplate] = [.terminal, .claudeCode, .codex, .gemini, .opencode, .amp, .cursor]
+    static let copilot = AgentTemplate(
+        id: "copilot",
+        title: "GitHub Copilot",
+        symbol: "hexagon.fill",
+        iconAsset: "githubcopilot",
+        tintHex: "6E40C9",
+        initialCommand: "copilot"
+    )
+
+    static let all: [AgentTemplate] = [.terminal, .claudeCode, .codex, .gemini, .opencode, .amp, .cursor, .copilot]
 
     /// Looks up a template by the slug an agent's hook system reports — the
     /// same string as the template's `initialCommand` (the binary name the

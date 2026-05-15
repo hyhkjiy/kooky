@@ -4,7 +4,7 @@
 
 🇨🇳 中文  ·  🇬🇧 [English](README.md)
 
-![kooky 截图：侧边栏里有三个 workspace，两个 pane 并排运行 Claude Code 和 Codex，`+` 菜单展开了六种内置 agent](screenshot.png)
+![kooky 截图：侧边栏里有三个 workspace，两个 pane 并排运行 Claude Code 和 Codex，`+` 菜单展开了七种内置 agent](screenshot.png)
 
 专为 AI coding 优化的极简 macOS 终端。支持侧边栏 workspace 管理、水平 / 垂直分屏、一键启动 agent、实时查看 agent 状态，也能在 pane 底部直接看到 Git、Node、Python 等工作区状态。开源，MIT 许可；不需要账号，不做遥测，应用状态都留在本机。GPU 渲染基于 [libghostty](https://github.com/ghostty-org/ghostty)。
 
@@ -16,7 +16,7 @@
 
 **垂直 tab 和分屏。** 侧边栏管理所有 workspace，三档宽度可切换（`⌘⌃S`）。每个 pane 都有独立 tab 栏和当前 tab。tab 可以拖动排序，也能跨 pane 整体移动。重启后状态自动恢复。
 
-**一键启动各种 agent。** Claude Code · Codex · Gemini CLI · OpenCode · Amp · Cursor CLI。`+` 菜单里选一个,agent 会在第一个 prompt 出现前启动。
+**一键启动各种 agent。** Claude Code · Codex · Gemini CLI · OpenCode · Amp · Cursor CLI · GitHub Copilot。`+` 菜单里选一个,agent 会在第一个 prompt 出现前启动。
 
 **Agent 状态实时展示。** 侧边栏圆点显示每个 agent 的状态：运行中（蓝）、等待你处理（琥珀）、空闲（无色）。上一条命令非零退出时，tab 和 workspace 会同步显示红点；悬停可看到 `exit N · 12.4s`。
 

@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.10.4 — 2026-05-15
+
+- **GitHub Copilot joins the agent menu.** New entry for `copilot` (GitHub Copilot CLI — went GA Feb 2026 as a real interactive TUI, not the old one-shot `gh copilot suggest`). Install with `brew install copilot-cli` or `npm install -g @github/copilot`. Wired like Amp and Cursor — bracket wrapper sends `running` before launch / `ended` after exit so the sidebar dot and tab icon track lifecycle. Mid-run state via Copilot's own hook system (it's fully featured — `userPromptSubmitted` / `agentStop` / `notification` events) is deferred to the next release while we work out the merge with users' existing `~/.copilot/settings.json`.
+
 ## v0.10.3 — 2026-05-15
 
 - **Default agent for `+` and `⌘T`.** Settings → Coding Agents now has a "default" picker at the top: pick any visible agent (or Terminal) to skip the popover entirely. `+` and `⌘T` open that agent straight away. Leave it on **Ask each time** to keep the popover on the `+` button — `⌘T` stays deterministic and opens Terminal (keyboard-shortcut convention), so the shortcut is always predictable. If the chosen default gets hidden later, kooky transparently falls back: `+` shows the picker again, `⌘T` opens Terminal. Persists to `~/.kooky/settings.json` under `agents.default`.
