@@ -119,7 +119,12 @@ struct AgentTemplate: Identifiable, Hashable {
                 if let flag = promptLaunchFlag {
                     promptFragment = " \(flag) \(quoted)"
                 } else {
-                    promptFragment = " \(quoted)"
+                    // POSIX `--` separator stops the CLI's argparse from
+                    // treating a prompt that starts with `-` as a flag.
+                    // Right-clicking `ls -la` output and asking Codex /
+                    // Claude would otherwise hit "unexpected argument
+                    // '-rw-r--r--@...'" on the first dashed line.
+                    promptFragment = " -- \(quoted)"
                 }
             }
             let extrasFragment = trimmedExtras.isEmpty ? "" : " \(trimmedExtras)"

@@ -262,9 +262,8 @@ final class LibghosttyEngine: TerminalEngine {
         surfaceView.readSelection()
     }
 
-    var contextMenuExtrasProvider: (() -> [ContextMenuExtra])? {
-        get { surfaceView.contextMenuExtrasProvider }
-        set { surfaceView.contextMenuExtrasProvider = newValue }
+    func paste(_ text: String) {
+        surfaceView.paste(text)
     }
 }
 
@@ -273,20 +272,6 @@ final class LibghosttyEngine: TerminalEngine {
 /// AppKit host view that libghostty renders into directly. The view's pointer
 /// lives in `ghostty_surface_config_s.platform.macos.nsview`; libghostty owns
 /// the Metal layer and draws into it.
-/// Bridges a Swift closure to an Objective-C `@selector` so we can drop
-/// it onto an NSMenuItem.target without subclassing NSMenuItem itself.
-/// Lifetime owned by `GhosttySurfaceView.contextMenuTargets` — see the
-/// comment on that property for the weak-target hazard.
-@MainActor
-private final class MenuActionTarget: NSObject {
-    let action: () -> Void
-    init(action: @escaping () -> Void) {
-        self.action = action
-        super.init()
-    }
-    @objc func fire(_ sender: Any?) { action() }
-}
-
 @MainActor
 final class GhosttySurfaceView: NSView {
     private static let defaultBackingScale: CGFloat = 2.0
@@ -304,15 +289,6 @@ final class GhosttySurfaceView: NSView {
     var onSearchEnd: (() -> Void)?
     var onSearchTotal: ((Int) -> Void)?
     var onSearchSelected: ((Int) -> Void)?
-    /// External provider for "Ask <agent>" rows prepended to the
-    /// right-click menu. WorkspaceStore wires this on session spawn so
-    /// the closure captures live workspace / store / session references.
-    var contextMenuExtrasProvider: (() -> [ContextMenuExtra])?
-    /// Holds strong refs to NSMenuItem.target objects for the current
-    /// build of the menu. NSMenuItem.target is weak — without keeping
-    /// these around past `popUpContextMenu`, the closure-bearing target
-    /// would deallocate before the user clicked.
-    private var contextMenuTargets: [NSObject] = []
     private(set) var surface: ghostty_surface_t? {
         didSet {
             if surface != nil { propagateSizeToSurface() }
@@ -550,15 +526,14 @@ final class GhosttySurfaceView: NSView {
         let cmdOnly = cmd && mods.intersection([.shift, .control, .option]).isEmpty
 
         // Cmd+V: read the system pasteboard directly and inject as text via
-        // the paste path so bracketed-paste mode wraps it correctly.
+        // the paste path so bracketed-paste mode wraps it correctly. The
+        // right-click Paste menu shares the same path via `paste(_:)`.
         if cmdOnly,
            event.charactersIgnoringModifiers?.lowercased() == "v",
            let pasted = NSPasteboard.general.string(forType: .string),
            !pasted.isEmpty
         {
-            pasted.withCString { cstr in
-                ghostty_surface_text(surface, cstr, UInt(strlen(cstr)))
-            }
+            paste(pasted)
             return
         }
 
@@ -568,7 +543,7 @@ final class GhosttySurfaceView: NSView {
            event.charactersIgnoringModifiers?.lowercased() == "c",
            ghostty_surface_has_selection(surface)
         {
-            performMenuCopy(nil)
+            performCopy()
             return
         }
 
@@ -774,72 +749,12 @@ final class GhosttySurfaceView: NSView {
         forwardMouseEvent(event, button: (.RELEASE, .LEFT))
     }
 
-    override func rightMouseDown(with event: NSEvent) {
-        // Show our own context menu instead of forwarding the right-click to
-        // libghostty (libghostty has no built-in menu and would just consume).
-        let menu = buildContextMenu()
-        NSMenu.popUpContextMenu(menu, with: event, for: self)
-    }
-
-    override func rightMouseUp(with event: NSEvent) {
-        // No-op — menu owns the rest of the gesture.
-    }
-
-    private func buildContextMenu() -> NSMenu {
-        let menu = NSMenu()
-        let hasSelection = surface.map { ghostty_surface_has_selection($0) } ?? false
-
-        // Ask <agent> rows go on top when there's a selection to feed them.
-        // Provider returns nothing → menu starts directly with Copy/Paste.
-        // Drop the previous build's targets here — NSMenu is modal so no
-        // outstanding menu can fire after another right-click rebuilds.
-        contextMenuTargets.removeAll()
-        if hasSelection, let provider = contextMenuExtrasProvider {
-            let extras = provider()
-            for extra in extras {
-                let target = MenuActionTarget(action: extra.action)
-                contextMenuTargets.append(target)
-                let title = extra.isDefault ? "▸ \(extra.title)" : extra.title
-                let item = NSMenuItem(
-                    title: title,
-                    action: #selector(MenuActionTarget.fire(_:)),
-                    keyEquivalent: ""
-                )
-                item.target = target
-                menu.addItem(item)
-            }
-            if !extras.isEmpty {
-                menu.addItem(.separator())
-            }
-        }
-
-        let copy = NSMenuItem(title: "Copy", action: #selector(performMenuCopy(_:)), keyEquivalent: "c")
-        copy.target = self
-        copy.isEnabled = hasSelection
-        menu.addItem(copy)
-
-        let paste = NSMenuItem(title: "Paste", action: #selector(performMenuPaste(_:)), keyEquivalent: "v")
-        paste.target = self
-        paste.isEnabled = NSPasteboard.general.string(forType: .string)?.isEmpty == false
-        menu.addItem(paste)
-
-        menu.addItem(.separator())
-
-        let selectAll = NSMenuItem(title: "Select All", action: #selector(performMenuSelectAll(_:)), keyEquivalent: "a")
-        selectAll.target = self
-        menu.addItem(selectAll)
-
-        let clear = NSMenuItem(title: "Clear", action: #selector(performMenuClear(_:)), keyEquivalent: "k")
-        clear.target = self
-        menu.addItem(clear)
-
-        return menu
-    }
-
-    @objc private func performMenuCopy(_ sender: Any?) {
-        // Direct selection extraction — bypasses the libghostty binding +
-        // write_clipboard_cb path so the menu item works regardless of which
-        // keys are bound for copy in the active config.
+    /// Direct selection extraction — bypasses the libghostty binding +
+    /// write_clipboard_cb path so `keyDown`'s Cmd+C fallback works
+    /// regardless of which keys are bound for copy in the active config.
+    /// The right-click "Copy" entry in the SwiftUI popover takes the same
+    /// path via the `TerminalEngine.readSelection()` interface.
+    private func performCopy() {
         guard let str = readSelection() else { return }
         let pb = NSPasteboard.general
         pb.clearContents()
@@ -859,37 +774,9 @@ final class GhosttySurfaceView: NSView {
         return str
     }
 
-    @objc private func performMenuPaste(_ sender: Any?) {
-        guard let surface,
-              let text = NSPasteboard.general.string(forType: .string),
-              !text.isEmpty
-        else { return }
+    func paste(_ text: String) {
+        guard let surface, !text.isEmpty else { return }
         text.withCString { ghostty_surface_text(surface, $0, UInt(strlen($0))) }
-    }
-
-    @objc private func performMenuSelectAll(_ sender: Any?) {
-        synthesizeBoundKey(key: GHOSTTY_KEY_A, character: "a", mods: [.command])
-    }
-
-    @objc private func performMenuClear(_ sender: Any?) {
-        synthesizeBoundKey(key: GHOSTTY_KEY_K, character: "k", mods: [.command])
-    }
-
-    /// Synthesize a key event for libghostty's binding layer (e.g. Cmd+A →
-    /// select_all) without going through AppKit's keyDown path.
-    private func synthesizeBoundKey(key: ghostty_input_key_e, character: String, mods: NSEvent.ModifierFlags) {
-        guard let surface else { return }
-        var keyEvent = ghostty_input_key_s()
-        keyEvent.action = GHOSTTY_ACTION_PRESS
-        keyEvent.mods = Self.mapModifiers(mods)
-        keyEvent.consumed_mods = ghostty_input_mods_e(rawValue: 0)
-        keyEvent.keycode = UInt32(key.rawValue)
-        character.withCString { cstr in
-            keyEvent.text = cstr
-            keyEvent.unshifted_codepoint = UInt32(character.unicodeScalars.first?.value ?? 0)
-            keyEvent.composing = false
-            _ = ghostty_surface_key(surface, keyEvent)
-        }
     }
 
     /// Drives the scroll indicator from libghostty's SCROLLBAR action. Skips

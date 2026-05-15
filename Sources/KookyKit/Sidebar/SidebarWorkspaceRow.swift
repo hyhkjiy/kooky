@@ -31,7 +31,7 @@ struct SidebarWorkspaceRow: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: onActivate)
         .onHover { isHovered = $0 }
-        .overlay(RightClickCatcher { isContextMenuOpen = true })
+        .overlay(RightClickCatcher { _ in isContextMenuOpen = true })
         .popover(isPresented: $isContextMenuOpen, arrowEdge: .trailing) {
             VStack(alignment: .leading, spacing: 0) {
                 KookyMenuRow(title: "Close Workspace", shortcut: "⌘⇧W") {

@@ -2,6 +2,13 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.11.1 — 2026-05-15
+
+- Right-click menu now matches the rest of kooky's brutalist style — same `KookyMenuList` / `KookyMenuRow` as the tab pill and sidebar menus, anchored at the click position. Each "Ask <agent>" row shows the agent's brand icon; the default agent gets a leading `▸`.
+- Fixed: right-clicking selections that start with `-` (e.g. `ls -la` output) would crash some agents' argparsers as "unexpected argument". Kooky now passes a POSIX `--` separator before positional prompts so anything that looks like a flag is treated as plain text.
+- Fixed: Paste in the right-click menu now uses the same bracketed-paste path as ⌘V, so multi-line pastes into zsh / vim behave the same regardless of how you triggered them.
+- Fixed: right-clicking inside an inactive split now activates that pane first, so "Ask <agent>" spawns the new tab in the split you actually clicked, and the keyboard cursor follows.
+
 ## v0.11.0 — 2026-05-15
 
 - Right-click selection → "Ask <agent>". Select an error / log line / file path in any terminal, right-click → native menu lists every agent in your `+` menu (Claude / Codex / Gemini / Cursor / Copilot / OpenCode / Amp). Pick one → a new tab spawns with the selection already submitted as the first prompt, agent starts answering immediately. Zero ⌘C / ⌘V.

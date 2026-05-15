@@ -32,6 +32,9 @@ private struct PaneView: View {
 
     private static let inactivePaneOpacity: Double = 0.5
 
+    @State private var contextMenuOpen = false
+    @State private var contextMenuAnchor: UnitPoint = .center
+
     var body: some View {
         let paneOpacity = isFocused ? 1.0 : Self.inactivePaneOpacity
         VStack(spacing: 0) {
@@ -41,6 +44,30 @@ private struct PaneView: View {
                 TerminalView(engine: active.engine)
                     .id(active.id)
                     .padding(8)
+                    .overlay(RightClickCatcher { unit in
+                        // Promote this pane to the workspace's active one —
+                        // RightClickCatcher swallows rightMouseDown before
+                        // libghostty sees it, so `engine.onFocus` never
+                        // fires. Without this, the menu would dismiss but
+                        // keystrokes + new-agent-tab spawns would still go
+                        // to whichever pane had focus before.
+                        store.activateTab(active, in: workspace)
+                        contextMenuAnchor = unit
+                        contextMenuOpen = true
+                    })
+                    .popover(
+                        isPresented: $contextMenuOpen,
+                        attachmentAnchor: .point(contextMenuAnchor),
+                        arrowEdge: .top
+                    ) {
+                        PaneContextMenu(
+                            session: active,
+                            pane: pane,
+                            workspace: workspace,
+                            store: store,
+                            isPresented: $contextMenuOpen
+                        )
+                    }
                     .overlay(alignment: .topTrailing) {
                         // Per-pane: multiple panes can search simultaneously,
                         // each with their own needle and result count.
@@ -443,6 +470,96 @@ private struct ProxyEntryRow: View {
                 .fill(isHovered ? Theme.chromeHover : .clear)
         )
         .onHover { isHovered = $0 }
+    }
+}
+
+/// Right-click context menu for a terminal pane. Top section is the
+/// "Ask <agent>" rows (visible only when there's a selection); below
+/// the divider are the standard Copy / Paste / Select All / Clear
+/// actions rendered in the same brutalist style as the rest of kooky's
+/// popover menus instead of the system NSMenu. Anchored at the click
+/// site via `attachmentAnchor: .point(...)` so it reads as a contextual
+/// menu, not a static popover on the pane edge.
+private struct PaneContextMenu: View {
+    let session: Session
+    /// Pane the right-click landed on. Explicitly passed (rather than
+    /// inferred from `workspace.activePane`) so Ask <agent> spawns the
+    /// new tab inside the visually-right-clicked split, even when the
+    /// outer activate-on-right-click call hasn't yet rippled through
+    /// SwiftUI state.
+    @Bindable var pane: Pane
+    @Bindable var workspace: Workspace
+    @Bindable var store: WorkspaceStore
+    @Binding var isPresented: Bool
+
+    private let model = KookySettingsModel.shared
+
+    var body: some View {
+        let selection = session.engine.readSelection() ?? ""
+        let hasSelection = !selection.isEmpty
+        let pasteAvailable = !(NSPasteboard.general.string(forType: .string) ?? "").isEmpty
+        let askRows = hasSelection ? buildAskRows() : []
+        KookyMenuList(width: 240, maxHeight: 480) {
+            if !askRows.isEmpty {
+                ForEach(askRows, id: \.template.id) { row in
+                    KookyMenuRow(
+                        title: row.isDefault ? "▸ Ask \(row.template.title)" : "Ask \(row.template.title)",
+                        leading: {
+                            AgentIconView(asset: row.template.iconAsset, fallbackSymbol: row.template.symbol, size: 16)
+                        }
+                    ) {
+                        ask(agent: row.template, selection: selection)
+                    }
+                }
+                Divider()
+            }
+            KookyMenuRow(title: "Copy", shortcut: "⌘C", isDisabled: !hasSelection) {
+                isPresented = false
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(selection, forType: .string)
+            }
+            KookyMenuRow(title: "Paste", shortcut: "⌘V", isDisabled: !pasteAvailable) {
+                isPresented = false
+                if let text = NSPasteboard.general.string(forType: .string), !text.isEmpty {
+                    session.engine.paste(text)
+                }
+            }
+            Divider()
+            KookyMenuRow(title: "Select All", shortcut: "⌘A") {
+                isPresented = false
+                session.engine.performAction("select_all")
+            }
+            KookyMenuRow(title: "Clear", shortcut: "⌘K") {
+                isPresented = false
+                session.engine.performAction("clear_screen")
+            }
+        }
+    }
+
+    private func buildAskRows() -> [(template: AgentTemplate, isDefault: Bool)] {
+        let defaultId = AgentTemplate.defaultLaunchTemplate(model: model)
+            .flatMap { $0.id == "terminal" ? nil : $0.id }
+        let visible = AgentTemplate.visibleOrdered(model: model).filter { $0.id != "terminal" }
+        var rows: [(AgentTemplate, Bool)] = []
+        if let defaultId, let def = visible.first(where: { $0.id == defaultId }) {
+            rows.append((def, true))
+        }
+        for t in visible where t.id != defaultId {
+            rows.append((t, false))
+        }
+        return rows
+    }
+
+    private func ask(agent: AgentTemplate, selection: String) {
+        isPresented = false
+        let tab = store.addTab(
+            in: workspace,
+            pane: pane,
+            template: agent,
+            initialCwd: session.currentDirectory,
+            initialPrompt: selection
+        )
+        store.activateTab(tab, in: workspace)
     }
 }
 

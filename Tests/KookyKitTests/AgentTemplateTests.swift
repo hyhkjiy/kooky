@@ -92,7 +92,7 @@ final class AgentTemplateTests: XCTestCase {
 
     func testMakeSessionConfigPositionalPromptForClaude() {
         let config = AgentTemplate.claudeCode.makeSessionConfig(initialPrompt: "fix this error")
-        XCTAssertEqual(config.environment["KOOKY_AGENT"], "claude 'fix this error'")
+        XCTAssertEqual(config.environment["KOOKY_AGENT"], "claude -- 'fix this error'")
     }
 
     func testMakeSessionConfigFlagPromptForCopilot() {
@@ -114,26 +114,26 @@ final class AgentTemplateTests: XCTestCase {
         ]
         for (template, bin) in pairs {
             let config = template.makeSessionConfig(initialPrompt: "hello")
-            XCTAssertEqual(config.environment["KOOKY_AGENT"], "\(bin) 'hello'", "agent \(template.id)")
+            XCTAssertEqual(config.environment["KOOKY_AGENT"], "\(bin) -- 'hello'", "agent \(template.id)")
         }
     }
 
     func testMakeSessionConfigQuotesSingleQuotesInPrompt() {
         // POSIX wrap: `'` inside single quotes becomes `'\''`
         let config = AgentTemplate.claudeCode.makeSessionConfig(initialPrompt: "don't fix it")
-        XCTAssertEqual(config.environment["KOOKY_AGENT"], "claude 'don'\\''t fix it'")
+        XCTAssertEqual(config.environment["KOOKY_AGENT"], "claude -- 'don'\\''t fix it'")
     }
 
     func testMakeSessionConfigCombinesPromptAndExtras() {
         let config = AgentTemplate.claudeCode.makeSessionConfig(extraOptions: "--model opus", initialPrompt: "review this")
-        XCTAssertEqual(config.environment["KOOKY_AGENT"], "claude 'review this' --model opus")
+        XCTAssertEqual(config.environment["KOOKY_AGENT"], "claude -- 'review this' --model opus")
     }
 
     func testInitialPromptSuppressesResume() {
         // Ask <agent> is a fresh question — don't graft onto a stale
         // conversation. Both supplied → prompt wins, resume dropped.
         let config = AgentTemplate.claudeCode.makeSessionConfig(resumeId: "old-convo", initialPrompt: "new question")
-        XCTAssertEqual(config.environment["KOOKY_AGENT"], "claude 'new question'")
+        XCTAssertEqual(config.environment["KOOKY_AGENT"], "claude -- 'new question'")
     }
 
     func testEmptyInitialPromptIgnored() {
@@ -158,5 +158,14 @@ final class AgentTemplateTests: XCTestCase {
         let template = AgentTemplate.fromCustom(custom)
         let config = template.makeSessionConfig(initialPrompt: "hello")
         XCTAssertEqual(config.environment["KOOKY_AGENT"], "amp -x 'hello'")
+    }
+
+    func testPositionalPromptWithDashPrefixRoutedThroughSeparator() {
+        // Real-world bug: user right-clicks `ls -la` output, the first
+        // line begins `-rw-r--r--@`. Without the `--` separator the
+        // agent's argparse would reject it as an unknown flag. The
+        // POSIX separator + POSIX-quoted prompt together neutralise it.
+        let config = AgentTemplate.codex.makeSessionConfig(initialPrompt: "-rw-r--r--@  1 corey staff  44")
+        XCTAssertEqual(config.environment["KOOKY_AGENT"], "codex -- '-rw-r--r--@  1 corey staff  44'")
     }
 }

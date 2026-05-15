@@ -534,7 +534,7 @@ final class WorkspaceStoreTests: XCTestCase {
         let ws = store.addWorkspace(workingDirectory: projectA)
         let tab = store.addTab(in: ws, template: .claudeCode, initialPrompt: "explain this")
         let cfg = engine(tab).startedConfigs.last
-        XCTAssertEqual(cfg?.environment["KOOKY_AGENT"], "claude 'explain this'")
+        XCTAssertEqual(cfg?.environment["KOOKY_AGENT"], "claude -- 'explain this'")
     }
 }
 

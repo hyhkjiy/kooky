@@ -704,41 +704,6 @@ final class WorkspaceStore {
             guard let session, session.searchSelected != selected else { return }
             session.searchSelected = selected
         }
-        engine.contextMenuExtrasProvider = { [weak self, weak session, weak workspace] in
-            guard let self, let session, let workspace else { return [] }
-            guard let selection = session.engine.readSelection(), !selection.isEmpty else {
-                return []
-            }
-            let model = KookySettingsModel.shared
-            let defaultId = AgentTemplate.defaultLaunchTemplate(model: model)
-                .flatMap { $0.id == "terminal" ? nil : $0.id }
-            let visible = AgentTemplate.visibleOrdered(model: model).filter { $0.id != "terminal" }
-            // Default first (with the leading ▸ glyph), then everyone else
-            // in their visibleOrdered position. `visibleOrdered` already
-            // honours user reordering + hiding, so the second block reads
-            // in the same order the user sees in `+`.
-            var rows: [(template: AgentTemplate, isDefault: Bool)] = []
-            if let defaultId, let def = visible.first(where: { $0.id == defaultId }) {
-                rows.append((def, true))
-            }
-            for t in visible where t.id != defaultId {
-                rows.append((t, false))
-            }
-            return rows.map { row in
-                let template = row.template
-                return ContextMenuExtra(title: "Ask \(template.title)", isDefault: row.isDefault) { [weak self, weak workspace, weak session] in
-                    guard let self, let workspace, let session else { return }
-                    guard let live = session.engine.readSelection(), !live.isEmpty else { return }
-                    let tab = self.addTab(
-                        in: workspace,
-                        template: template,
-                        initialCwd: session.currentDirectory,
-                        initialPrompt: live
-                    )
-                    self.activateTab(tab, in: workspace)
-                }
-            }
-        }
     }
 
     private func refreshGitStatus(for session: Session) {
