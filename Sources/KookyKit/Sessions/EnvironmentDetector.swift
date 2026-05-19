@@ -222,7 +222,7 @@ enum NodeVersionInventory {
 
     static func sortVersions(_ versions: [String]) -> [String] {
         versions.sorted { lhs, rhs in
-            compareVersions(lhs, rhs) == .orderedDescending
+            Version.compare(lhs, rhs) == .orderedDescending
         }
     }
 
@@ -244,7 +244,15 @@ enum NodeVersionInventory {
         return nvmDirectory
     }
 
-    private static func compareVersions(_ lhs: String, _ rhs: String) -> ComparisonResult {
+}
+
+/// Dotted-version compare shared by the nvm version sorter and the GitHub
+/// update checker. Each segment is parsed up to its first non-digit
+/// (`"0-rc"` → `0`); `localizedStandardCompare` breaks ties on equal
+/// numeric prefixes. Sufficient for release tags like `v0.12.0`; pre-release
+/// suffixes are not semver-aware, so don't rely on `0.12.0-rc.1 < 0.12.0`.
+enum Version {
+    static func compare(_ lhs: String, _ rhs: String) -> ComparisonResult {
         let left = numericParts(lhs)
         let right = numericParts(rhs)
         for i in 0..<max(left.count, right.count) {
@@ -256,11 +264,14 @@ enum NodeVersionInventory {
         return lhs.localizedStandardCompare(rhs)
     }
 
-    private static func numericParts(_ version: String) -> [Int] {
-        let raw = version.hasPrefix("v") ? String(version.dropFirst()) : version
-        return raw.split(separator: ".").map { part in
+    static func numericParts(_ version: String) -> [Int] {
+        stripLeadingV(version).split(separator: ".").map { part in
             let digits = part.prefix { $0.isNumber }
             return Int(digits) ?? 0
         }
+    }
+
+    static func stripLeadingV(_ version: String) -> String {
+        version.hasPrefix("v") ? String(version.dropFirst()) : version
     }
 }

@@ -60,6 +60,39 @@ enum Theme {
     static let chromeTransition: Animation = .easeInOut(duration: 0.2)
 }
 
+// MARK: - Brutalist primitives
+
+/// 1pt hairline stroke, sharp corners — the brutalist border shared by
+/// `BracketButton`, settings option fields, and the update prompt window.
+extension View {
+    func bracketBorder() -> some View {
+        overlay(Rectangle().stroke(Theme.chromeHairline, lineWidth: 1))
+    }
+}
+
+/// Plain-text `[bracketed]` button. Hairline border, mono, sharp corners.
+struct BracketButton: View {
+    let title: String
+    let action: () -> Void
+
+    init(_ title: String, action: @escaping () -> Void) {
+        self.title = title
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(Theme.mono(11.5, weight: .medium))
+                .foregroundStyle(Theme.chromeForeground)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .bracketBorder()
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 /// Registers bundled fonts at app launch via Core Text. SPM resources show up
 /// in `Bundle.module`; CTFontManagerRegisterFontsForURL exposes them by family
 /// name so SwiftUI's Font.custom("...") finds them.

@@ -464,37 +464,6 @@ private struct SettingsHairline: View {
     }
 }
 
-/// 1pt hairline stroke, sharp corners — the brutalist border shared by
-/// `BracketButton` and the options textfield.
-private extension View {
-    func bracketBorder() -> some View {
-        overlay(Rectangle().stroke(Theme.chromeHairline, lineWidth: 1))
-    }
-}
-
-/// Plain-text `[bracketed]` button. Hairline border, mono, sharp corners.
-private struct BracketButton: View {
-    let title: String
-    let action: () -> Void
-
-    init(_ title: String, action: @escaping () -> Void) {
-        self.title = title
-        self.action = action
-    }
-
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(Theme.mono(11.5, weight: .medium))
-                .foregroundStyle(Theme.chromeForeground)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .bracketBorder()
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 /// Reorderable list of non-terminal agent templates. The user's saved order
 /// (`model.agentOrder`) is the source of truth; templates absent from it
 /// (e.g. a fresh kooky install, or a new agent in a future version) are

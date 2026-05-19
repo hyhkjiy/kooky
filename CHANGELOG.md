@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.12.1 — 2026-05-19
+
+- Check for Updates in the Kooky menu — see what's new and download the latest DMG in one click.
+
 ## v0.12.0 — 2026-05-19
 
 - Grok Build (xAI) joins the agent menu.

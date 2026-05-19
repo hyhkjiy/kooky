@@ -92,6 +92,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         // bundled Info.plist (the responder-chain default reads from there).
         mainMenu.addItem(submenu(buildMenu(title: KookyApp.name, entries: [
             selfRow("About \(KookyApp.name)", #selector(handleAbout)),
+            selfRow("Check for Updates…", #selector(handleCheckForUpdates(_:))),
             .separator,
             selfRow("Settings…", #selector(handleOpenSettings), ","),
             .separator,
@@ -457,6 +458,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
 
     @objc private func handleOpenRepo() {
         NSWorkspace.shared.open(KookyApp.repositoryURL)
+    }
+
+    @objc private func handleCheckForUpdates(_ sender: NSMenuItem) {
+        let originalTitle = sender.title
+        sender.title = "Checking for Updates…"
+        sender.isEnabled = false
+        // KOOKY_FAKE_VERSION lets us preview the "newer release" prompt without
+        // mutating KookyApp.displayVersion. Launch via:
+        //   open --env KOOKY_FAKE_VERSION=0.11.0 /Applications/Kooky.app
+        let currentVersion = ProcessInfo.processInfo.environment["KOOKY_FAKE_VERSION"]
+            ?? KookyApp.displayVersion
+        Task { @MainActor in
+            let outcome = await UpdateChecker.check(currentVersion: currentVersion)
+            sender.title = originalTitle
+            sender.isEnabled = true
+            UpdatePromptWindowController.present(outcome: outcome, currentVersion: currentVersion)
+        }
     }
 
     @objc private func handleOpenSettings() {
