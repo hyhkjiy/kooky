@@ -2,6 +2,11 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.12.2 — 2026-05-20
+
+- Antigravity CLI joins the agent menu — Google's Go-based successor to Gemini CLI.
+- Fixed: picking Antigravity from the `+` menu when only the IDE is installed now surfaces a clear CLI install hint instead of accidentally opening the IDE app.
+
 ## v0.12.1 — 2026-05-19
 
 - Check for Updates in the Kooky menu — see what's new and download the latest DMG in one click.

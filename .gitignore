@@ -43,3 +43,6 @@ GEMINI.md
 .clinerules
 .windsurfrules
 .continue/
+
+# Antigravity CLI runtime state (project-scoped symlinks into ~/.gemini)
+.antigravitycli/

@@ -231,9 +231,41 @@ extension AgentTemplate {
         initialCommand: "grok"
     )
 
-    /// The 9 templates shipped with kooky. User-defined custom agents are
+    /// Antigravity CLI — Google's Go-based successor to Gemini CLI; binary
+    /// `agy`. The `.gemini` template stays in `builtin` alongside this one
+    /// until 2026-06-18 when free/Pro access to Gemini CLI sunsets;
+    /// Enterprise (Code Assist Standard/Enterprise) retains the old CLI.
+    ///
+    /// Naming-conflict footgun: Antigravity 2.0 IDE installs a VS-Code-
+    /// style launcher *also* called `agy` at
+    /// `~/.antigravity/antigravity/bin/agy`. With only the IDE installed,
+    /// `agy` opens the GUI. The CLI installer puts its `agy` in
+    /// `~/.local/bin/` (earlier on PATH), so installing the CLI resolves
+    /// the conflict.
+    ///
+    /// `-i` (`--prompt-interactive`) is the right flag for Ask <agent>:
+    /// runs the initial prompt and keeps the session alive. `-p`
+    /// (`--print`) would single-shot exit.
+    ///
+    /// Resume / mid-run attention dot deferred: Antigravity has hooks
+    /// (SessionStart / UserPromptSubmit / Stop per third-party docs) and
+    /// `--conversation <id>`, but the JSON schema, settings-file location,
+    /// and a system-inject env var (no `ANTIGRAVITY_CLI_SYSTEM_SETTINGS_PATH`
+    /// analogue of Gemini's) are all undocumented. Revisit when
+    /// antigravity.google/docs/hooks publishes the schema.
+    static let antigravity = AgentTemplate(
+        id: "antigravity",
+        title: "Antigravity CLI",
+        symbol: "arrow.up.circle.fill",
+        iconAsset: "antigravity",
+        tintHex: "4285F4",
+        initialCommand: "agy",
+        promptLaunchFlag: "-i"
+    )
+
+    /// The 10 templates shipped with kooky. User-defined custom agents are
     /// merged on top via `all` at runtime.
-    static let builtin: [AgentTemplate] = [.terminal, .claudeCode, .codex, .gemini, .opencode, .amp, .cursor, .copilot, .grok]
+    static let builtin: [AgentTemplate] = [.terminal, .claudeCode, .codex, .gemini, .opencode, .amp, .cursor, .copilot, .grok, .antigravity]
 
     /// All templates available right now — `builtin` plus the user's custom
     /// agents from Settings → Agents. MainActor-isolated because it

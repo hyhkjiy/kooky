@@ -72,16 +72,19 @@ final class AgentTemplateTests: XCTestCase {
     }
 
     func testMakeSessionConfigIgnoresResumeOnUnsupportedBuiltins() {
-        // Codex / Cursor / Gemini / OpenCode / Copilot / Amp / Grok all
-        // support a resume flag syntactically but kooky doesn't have a
-        // reliable id-capture path for them yet, so we don't inject the
-        // flag — see AgentTemplate.supportsResume / resumeFlag.
+        // Codex / Cursor / Gemini / OpenCode / Copilot / Amp / Grok /
+        // Antigravity all support a resume flag syntactically but kooky
+        // doesn't have a reliable id-capture path for them yet, so we
+        // don't inject the flag — see AgentTemplate.supportsResume /
+        // resumeFlag.
         let codexConfig = AgentTemplate.codex.makeSessionConfig(resumeId: "abc-123")
         XCTAssertEqual(codexConfig.environment["KOOKY_AGENT"], "codex")
         let copilotConfig = AgentTemplate.copilot.makeSessionConfig(resumeId: "abc-123")
         XCTAssertEqual(copilotConfig.environment["KOOKY_AGENT"], "copilot")
         let grokConfig = AgentTemplate.grok.makeSessionConfig(resumeId: "abc-123")
         XCTAssertEqual(grokConfig.environment["KOOKY_AGENT"], "grok")
+        let antigravityConfig = AgentTemplate.antigravity.makeSessionConfig(resumeId: "abc-123")
+        XCTAssertEqual(antigravityConfig.environment["KOOKY_AGENT"], "agy")
     }
 
     func testSupportsResumeMatchesResumeFlag() {
@@ -89,6 +92,7 @@ final class AgentTemplateTests: XCTestCase {
         XCTAssertFalse(AgentTemplate.codex.supportsResume)
         XCTAssertFalse(AgentTemplate.copilot.supportsResume)
         XCTAssertFalse(AgentTemplate.grok.supportsResume)
+        XCTAssertFalse(AgentTemplate.antigravity.supportsResume)
     }
 
     func testMakeSessionConfigInjectsResumeForClaudeBasedCustom() {
@@ -113,6 +117,11 @@ final class AgentTemplateTests: XCTestCase {
     func testMakeSessionConfigFlagPromptForAmp() {
         let config = AgentTemplate.amp.makeSessionConfig(initialPrompt: "fix this error")
         XCTAssertEqual(config.environment["KOOKY_AGENT"], "amp -x 'fix this error'")
+    }
+
+    func testMakeSessionConfigFlagPromptForAntigravity() {
+        let config = AgentTemplate.antigravity.makeSessionConfig(initialPrompt: "fix this error")
+        XCTAssertEqual(config.environment["KOOKY_AGENT"], "agy -i 'fix this error'")
     }
 
     func testMakeSessionConfigPositionalPromptForCodexCursorGeminiOpencodeGrok() {

@@ -166,6 +166,7 @@ enum KookyShellIntegration {
         writeWrapper(name: "cursor-agent", script: bracketWrapperScript(slug: "cursor-agent"))
         writeWrapper(name: "copilot", script: bracketWrapperScript(slug: "copilot"))
         writeWrapper(name: "grok", script: bracketWrapperScript(slug: "grok"))
+        writeWrapper(name: "agy", script: antigravityWrapperScript)
 
         let hookCmd = kookyHookBinaryPath
         writeJSON(at: claudeHooksPath, object: claudeHooksObject(hookCmd: hookCmd))
@@ -383,6 +384,35 @@ enum KookyShellIntegration {
     exec "$real" "$@"
     """
 
+    /// Antigravity CLI shares its binary name (`agy`) with Antigravity 2.0
+    /// IDE's command-line launcher (`~/.antigravity/antigravity/bin/agy`
+    /// is a symlink into `/Applications/Antigravity.app/...`). With only
+    /// the IDE installed, PATH-resolution would pick up the launcher and
+    /// a plain `exec agy` opens the GUI — surprising the user who picked
+    /// "Antigravity CLI" from the `+` menu. Detect the IDE shim by
+    /// resolving one symlink hop and matching `/Antigravity.app/`; on
+    /// match, route through the same "not installed" path the preamble
+    /// uses (red message + KookyHook `ended` ping so the tab icon
+    /// reverts) plus surface the official CLI install command.
+    static let antigravityWrapperScript = """
+    \(wrapperPreamble(binary: "agy"))
+
+    real_target="$(readlink "$real" 2>/dev/null || true)"
+    case "${real_target:-$real}" in
+        */Antigravity.app/*)
+            printf '\\n  \\033[33mThe `agy` on PATH is the Antigravity IDE launcher, not the CLI.\\033[0m\\n' >&2
+            printf '  Install the CLI:\\n' >&2
+            printf '    \\033[36mcurl -fsSL https://antigravity.google/cli/install.sh | bash\\033[0m\\n\\n' >&2
+            if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" ]]; then
+                "$KOOKY_HOOK_BIN" agy ended 2>/dev/null
+            fi
+            exit 127
+            ;;
+    esac
+
+    \(bracketBody(slug: "agy"))
+    """
+
     /// Generic bracket wrapper for agents we can't drive mid-run state from
     /// (no hook system or no installed plugin yet). Sends `running` before
     /// exec and `ended` after exit; activity dot stays green for the whole
@@ -392,6 +422,17 @@ enum KookyShellIntegration {
         """
         \(wrapperPreamble(binary: slug))
 
+        \(bracketBody(slug: slug))
+        """
+    }
+
+    /// The `running` → exec → `ended` body shared by `bracketWrapperScript`
+    /// and `antigravityWrapperScript`. Outside a kooky session
+    /// (`$KOOKY_SURFACE_ID` unset) the bracket is a no-op — `exec "$real"`
+    /// is the only line that runs so the wrapper is transparent when the
+    /// user invokes the binary from a plain Terminal.app shell.
+    private static func bracketBody(slug: String) -> String {
+        """
         if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" ]]; then
             "$KOOKY_HOOK_BIN" \(slug) running 2>/dev/null
             "$real" "$@"

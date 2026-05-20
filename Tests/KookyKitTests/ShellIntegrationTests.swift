@@ -54,6 +54,27 @@ final class ShellIntegrationTests: XCTestCase {
         XCTAssertTrue(script.contains("exec \"$real\" \"$@\""), "must passthrough when KOOKY_SURFACE_ID is unset")
     }
 
+    func testAntigravityWrapperGuardsAgainstIDEShim() {
+        // Antigravity 2.0 IDE installs a launcher also called `agy` that
+        // symlinks into `/Applications/Antigravity.app/...`. Without
+        // detection, an IDE-only-installed user picking "Antigravity CLI"
+        // from `+` would accidentally open the GUI app.
+        let script = KookyShellIntegration.antigravityWrapperScript
+
+        XCTAssertTrue(script.contains("readlink \"$real\""), "must resolve symlink one hop")
+        XCTAssertTrue(script.contains("*/Antigravity.app/*"), "must match IDE launcher resolved path")
+        XCTAssertTrue(script.contains("antigravity.google/cli/install.sh"), "must surface CLI install command")
+        XCTAssertTrue(script.contains("\"$KOOKY_HOOK_BIN\" agy ended"), "must revert tab icon on shim-detection bail")
+        XCTAssertTrue(script.contains("exit 127"), "must mirror preamble's not-installed exit code")
+    }
+
+    func testAntigravityWrapperBracketsRunningAndEndedForRealCLI() {
+        let script = KookyShellIntegration.antigravityWrapperScript
+
+        XCTAssertTrue(script.contains("\"$KOOKY_HOOK_BIN\" agy running"))
+        XCTAssertTrue(script.contains("exec \"$real\" \"$@\""), "must passthrough when KOOKY_SURFACE_ID is unset")
+    }
+
     func testOpencodePluginShellsOutToHookBinForBothEvents() {
         let body = KookyShellIntegration.opencodePluginScript
 
