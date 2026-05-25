@@ -20,6 +20,8 @@ A minimal modern terminal built for AI coding. Sidebar workspaces; horizontal / 
 
 **Right-click a selection → "Ask <agent>".** Select an error / log line / file path, right-click, pick any agent — a new tab spawns with the selection already submitted as the first prompt. Zero ⌘C / ⌘V to go from "what is this" to an actual answer.
 
+**Quick Open (⌘P).** Fuzzy-search across every window's workspaces, tabs, agents, and Terminal presets from one floating panel. Type to filter, ↑↓ to navigate, Enter to jump or spawn. Triggers from ⌘P or the search pill in the top chrome.
+
 **Friction-free input.** Click anywhere on the zsh prompt to move the shell cursor there (no modifier needed, same UX as ghostty.app). Drag a file or folder from Finder onto any pane to drop its escaped absolute path at the cursor.
 
 **Agent activity readout.** Sidebar dot tracks each agent in real time — running (blue), waiting on you (amber), idle (none). Tab + workspace dots also turn red when the last command exited non-zero; hover for `exit N · 12.4s`.
@@ -82,7 +84,7 @@ Requires Xcode 26+ and macOS 14+ (Sonoma — `@Observable` is the floor).
 ./scripts/setup-libghostty.sh        # one-time: fetch the libghostty xcframework
 swift build
 swift run                            # dev mode
-swift test                           # 173 unit tests
+swift test                           # 187 unit tests
 
 ./scripts/build-app.sh               # writes dist/Kooky.app
 ./scripts/build-dmg.sh --build       # writes dist/Kooky-vX.Y.Z.dmg
