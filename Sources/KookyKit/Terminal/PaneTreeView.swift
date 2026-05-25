@@ -80,7 +80,7 @@ private struct PaneView: View {
                             .padding(.trailing, Theme.space3)
                         }
                     }
-                if active.gitStatus.branch != nil || !active.environment.isEmpty {
+                if paneStatusBarHasData(session: active) {
                     Rectangle().fill(Theme.chromeHairline).frame(height: 1)
                     PaneStatusBar(session: active)
                 }
@@ -93,6 +93,63 @@ private struct PaneView: View {
     }
 }
 
+/// One configurable slot of the pane status bar. Order + visibility are
+/// controlled by Settings → Status Bar (`KookySettingsModel.statusBarItems`
+/// + `.hiddenStatusBarItems`). Adding a new kind: append a case here,
+/// add the rendering branch in `PaneStatusBar.segment(for:)`, and add the
+/// data-presence branch in `paneStatusBarHasData`.
+enum StatusBarItemKind: String, CaseIterable, Codable, Hashable, Sendable {
+    case pythonVenv = "python-venv"
+    case nodeVersion = "node-version"
+    case proxy
+    case gitBranch = "git-branch"
+    case gitDiff = "git-diff"
+
+    var displayName: String {
+        switch self {
+        case .pythonVenv: return "Python venv"
+        case .nodeVersion: return "Node version"
+        case .proxy: return "Proxy"
+        case .gitBranch: return "Git branch"
+        case .gitDiff: return "Git diff"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .pythonVenv: return "p.circle.fill"
+        case .nodeVersion: return "n.circle.fill"
+        case .proxy: return "network"
+        case .gitBranch: return "arrow.triangle.branch"
+        case .gitDiff: return "line.3.horizontal.button.angledtop.vertical.right"
+        }
+    }
+
+    /// Default order shipped with kooky — used when the user hasn't
+    /// touched Settings → Status Bar.
+    static let defaultOrder: [StatusBarItemKind] = [
+        .pythonVenv, .nodeVersion, .proxy, .gitBranch, .gitDiff,
+    ]
+}
+
+/// Decides whether to draw the status-bar hairline + row. Returns false
+/// when every enabled kind has no data, so a bottom chrome divider
+/// doesn't draw over an empty row.
+@MainActor
+func paneStatusBarHasData(session: Session) -> Bool {
+    let model = KookySettingsModel.shared
+    for item in model.statusBarItems where !model.hiddenStatusBarItems.contains(item) {
+        switch item {
+        case .pythonVenv: if session.environment.pythonVenv != nil { return true }
+        case .nodeVersion: if session.environment.nodeVersion != nil { return true }
+        case .proxy: if session.environment.proxy != nil { return true }
+        case .gitBranch: if session.gitStatus.branch != nil { return true }
+        case .gitDiff: if session.gitStatus.branch != nil && session.gitStatus.filesChanged > 0 { return true }
+        }
+    }
+    return false
+}
+
 /// Chrome status bar pinned to the bottom of the active pane — Warp-style
 /// approximation. libghostty owns the terminal grid, so we can't inline
 /// above the prompt; pinning to chrome below the terminal is the closest
@@ -100,24 +157,41 @@ private struct PaneView: View {
 /// stacked right-aligned. Hidden entirely when no segment has data.
 private struct PaneStatusBar: View {
     @Bindable var session: Session
+    /// `.shared` is the only producer — `@Observable` tracks per-property
+    /// reads, so observation is per-`statusBarItems` / per-`hiddenStatusBarItems`
+    /// access without needing `@Bindable`.
+    private let model = KookySettingsModel.shared
 
     var body: some View {
         // Flow wraps overflowing segments to a new row instead of hiding
-        // them — narrow panes still surface every status (branch / proxy /
-        // env) at the cost of a taller chrome row. Each row is right-aligned
-        // so the visual matches the single-row layout when nothing wraps.
+        // them — narrow panes still surface every status at the cost of a
+        // taller chrome row. Each row is right-aligned so the visual
+        // matches the single-row layout when nothing wraps.
         FlowLayout(alignment: .trailing, spacing: 8, rowSpacing: 4) {
-            pythonSegment
-            nodeSegment
-            proxySegment
-            branchSegment
-            diffSegment
+            ForEach(visibleItems, id: \.self) { item in
+                segment(for: item)
+            }
         }
         .frame(maxWidth: .infinity)
         .font(Theme.mono(11))
         .padding(.horizontal, Theme.space4)
         .padding(.vertical, 5)
         .background(Theme.chromeBackground)
+    }
+
+    private var visibleItems: [StatusBarItemKind] {
+        model.statusBarItems.filter { !model.hiddenStatusBarItems.contains($0) }
+    }
+
+    @ViewBuilder
+    private func segment(for item: StatusBarItemKind) -> some View {
+        switch item {
+        case .pythonVenv: pythonSegment
+        case .nodeVersion: nodeSegment
+        case .proxy: proxySegment
+        case .gitBranch: branchSegment
+        case .gitDiff: diffSegment
+        }
     }
 
     @ViewBuilder

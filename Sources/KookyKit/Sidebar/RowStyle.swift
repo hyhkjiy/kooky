@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Shared row background palette for sidebar / tab / popover-menu rows.
@@ -134,6 +135,57 @@ struct KookyMenuDivider: View {
             .frame(height: 1)
             .padding(.vertical, 3)
             .padding(.horizontal, Theme.space2)
+    }
+}
+
+/// `≡` drag-source glyph used by every reorderable list (Settings →
+/// Agents, Terminals, Status Bar). Scoping `.onDrag` to the handle — not
+/// the whole row — keeps Toggle / TextField hit-testing independent and
+/// makes openHand the only cursor inside the row.
+struct ReorderHandle: View {
+    let payload: String
+    let onBeginDrag: () -> Void
+
+    var body: some View {
+        Image(systemName: "line.3.horizontal")
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(Theme.chromeMuted.opacity(0.7))
+            .frame(width: 22, height: 22)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                if hovering { NSCursor.openHand.push() } else { NSCursor.pop() }
+            }
+            .onDrag {
+                onBeginDrag()
+                return NSItemProvider(object: payload as NSString)
+            }
+    }
+}
+
+/// Row-level drop catcher used by every reorderable list. The `Color.clear`
+/// surface is load-bearing: putting `.dropDestination` on the row HStack
+/// with `.contentShape(Rectangle())` routes Toggle / TextField clicks
+/// through the row-wide content shape and registers them against the wrong
+/// row. `decode` converts the dragged `NSItemProvider` payload (always a
+/// `String`) into the caller's typed item; return `nil` to reject the drop.
+struct ReorderDropZone<Item: Equatable>: View {
+    let row: Item
+    let isDragging: Bool
+    let decode: (String) -> Item?
+    let onDrop: (Item) -> Bool
+    @State private var isTargeted = false
+
+    var body: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .dropIndicator(active: isTargeted && !isDragging, on: .top)
+            .dropDestination(for: String.self) { items, _ in
+                guard let raw = items.first,
+                      let dropped = decode(raw),
+                      dropped != row else { return false }
+                return onDrop(dropped)
+            } isTargeted: { isTargeted = $0 }
+            .allowsHitTesting(true)
     }
 }
 

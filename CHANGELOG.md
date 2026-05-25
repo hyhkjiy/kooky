@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.16.2 — 2026-05-25
+
+- **Settings → Status Bar** — drag to reorder the pane bottom status bar's slots (Python venv / Node version / Proxy / Git branch / Git diff), toggle individual ones off, or hide the whole row. Reset to defaults if you change your mind.
+
 ## v0.16.1 — 2026-05-25
 
 - Fixed the Quick Open search pill overlapping the sidebar toggle when the window was dragged narrow. The pill now stays in the drag-handle area and hides automatically when there isn't room for it — ⌘P and the File menu still open the palette.

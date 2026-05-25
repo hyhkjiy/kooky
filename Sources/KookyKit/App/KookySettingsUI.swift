@@ -51,6 +51,16 @@ final class KookySettingsModel {
     /// Sibling of `hiddenAgents` for the preset list. Hidden presets stay
     /// in `terminalPresets` so the user can re-enable without re-configuring.
     var hiddenPresets: Set<String> = []
+    /// Pane status bar slots in user-chosen order. Default = the order
+    /// kooky shipped before customisation (`StatusBarItemKind.defaultOrder`).
+    /// Hand-edited settings.json with an unknown raw value or a duplicate
+    /// drops the offending entry; missing entries are appended in default
+    /// order on load so a new kind shipped in a future kooky still shows.
+    var statusBarItems: [StatusBarItemKind] = StatusBarItemKind.defaultOrder
+    /// Sibling of `hiddenAgents` for status bar slots. Hidden slots stay
+    /// in `statusBarItems` so the user can re-enable without losing their
+    /// custom order.
+    var hiddenStatusBarItems: Set<StatusBarItemKind> = []
     /// When true, kooky launches Claude tabs with `--resume <id>` using the
     /// conversation id persisted on each tab (captured via Claude's hook
     /// payload). When false, every Claude tab starts fresh — but the
@@ -102,6 +112,24 @@ final class KookySettingsModel {
                 env: (dict["env"] as? String) ?? ""
             )
         }
+
+        let statusbar = parsed["statusbar"] as? [String: Any] ?? [:]
+        if let rawOrder = statusbar["order"] as? [String] {
+            var seen: Set<StatusBarItemKind> = []
+            let parsedOrder = rawOrder.compactMap { raw -> StatusBarItemKind? in
+                guard let item = StatusBarItemKind(rawValue: raw), !seen.contains(item) else { return nil }
+                seen.insert(item)
+                return item
+            }
+            // Append any items shipped in a kooky version newer than the
+            // user's saved file so a new kind doesn't silently disappear.
+            let missing = StatusBarItemKind.allCases.filter { !seen.contains($0) }
+            statusBarItems = parsedOrder + missing
+        } else {
+            statusBarItems = StatusBarItemKind.defaultOrder
+        }
+        let rawHiddenStatus = (statusbar["hidden"] as? [String]) ?? []
+        hiddenStatusBarItems = Set(rawHiddenStatus.compactMap(StatusBarItemKind.init(rawValue:)))
 
         let terminals = parsed["terminals"] as? [String: Any] ?? [:]
         hiddenPresets = Set((terminals["hidden"] as? [String]) ?? [])
@@ -203,6 +231,16 @@ final class KookySettingsModel {
             parsed["terminals"] = terminals
         }
 
+        let statusOrderIsDefault = statusBarItems == StatusBarItemKind.defaultOrder
+        if statusOrderIsDefault && hiddenStatusBarItems.isEmpty {
+            parsed.removeValue(forKey: "statusbar")
+        } else {
+            var statusbar = parsed["statusbar"] as? [String: Any] ?? [:]
+            statusbar["order"] = statusOrderIsDefault ? nil : statusBarItems.map(\.rawValue)
+            statusbar["hidden"] = hiddenStatusBarItems.isEmpty ? nil : hiddenStatusBarItems.map(\.rawValue).sorted()
+            parsed["statusbar"] = statusbar
+        }
+
         KookySettings.write(parsed)
         KookyShellIntegration.refreshClaudeCustomSettings(customAgents: customAgents)
     }
@@ -252,6 +290,12 @@ final class KookySettingsModel {
         scheduleSave()
     }
 
+    func resetStatusBar() {
+        statusBarItems = StatusBarItemKind.defaultOrder
+        hiddenStatusBarItems = []
+        scheduleSave()
+    }
+
     func deleteTerminalPreset(id: String) {
         terminalPresets.removeAll { $0.id == id }
         hiddenPresets.remove(id)
@@ -265,7 +309,7 @@ final class KookySettingsModel {
 }
 
 enum SettingsCategory: String, CaseIterable, Identifiable {
-    case general, terminalPresets, codingAgents, advanced
+    case general, terminalPresets, codingAgents, statusBar, advanced
 
     var id: String { rawValue }
 
@@ -274,6 +318,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         case .general: return "General"
         case .terminalPresets: return "Terminals"
         case .codingAgents: return "Agents"
+        case .statusBar: return "Status Bar"
         case .advanced: return "Advanced"
         }
     }
@@ -313,6 +358,8 @@ struct KookySettingsView: View {
         .onChange(of: model.resumeConversations) { _, _ in model.scheduleSave() }
         .onChange(of: model.terminalPresets) { _, _ in model.scheduleSave() }
         .onChange(of: model.hiddenPresets) { _, _ in model.scheduleSave() }
+        .onChange(of: model.statusBarItems) { _, _ in model.scheduleSave() }
+        .onChange(of: model.hiddenStatusBarItems) { _, _ in model.scheduleSave() }
     }
 
     private var sidebar: some View {
@@ -369,6 +416,7 @@ struct KookySettingsView: View {
             case .general: generalDetail
             case .terminalPresets: terminalPresetsDetail
             case .codingAgents: codingAgentsDetail
+            case .statusBar: statusBarDetail
             case .advanced: advancedDetail
             }
             Spacer(minLength: 28)
@@ -431,6 +479,10 @@ struct KookySettingsView: View {
 
     private var terminalPresetsDetail: some View {
         TerminalPresetsList(model: model)
+    }
+
+    private var statusBarDetail: some View {
+        StatusBarReorderList(model: model)
     }
 
     private var codingAgentsDetail: some View {
@@ -719,12 +771,11 @@ private struct AgentRow: View {
     let onBeginDrag: () -> Void
     let onDrop: (String) -> Bool
     let onDelete: (() -> Void)?
-    @State private var isTargeted = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 12) {
-                dragHandle
+                ReorderHandle(payload: template.id, onBeginDrag: onBeginDrag)
                 AgentIconView(asset: template.iconAsset, fallbackSymbol: template.symbol, size: 14)
                     .opacity(visible ? 1.0 : 0.35)
                 Text(template.title)
@@ -739,7 +790,7 @@ private struct AgentRow: View {
             }
             .padding(.horizontal, 22)
             .padding(.vertical, 10)
-            .background(dropZone)
+            .background(ReorderDropZone(row: template.id, isDragging: isDragging, decode: { $0 }, onDrop: onDrop))
             if isExpanded { expandedForm }
         }
         .opacity(isDragging ? 0.35 : 1.0)
@@ -862,44 +913,6 @@ private struct AgentRow: View {
         .padding(.trailing, 22)
     }
 
-    /// `.dropDestination` lives on a clear background layer so the row's
-    /// foreground (Toggle in particular) keeps independent hit-testing.
-    /// Earlier attempts attached the drop modifier to the row HStack with
-    /// `.contentShape(Rectangle())`; SwiftUI then routed clicks via the
-    /// row-wide content shape and toggles registered against the wrong row.
-    private var dropZone: some View {
-        Color.clear
-            .contentShape(Rectangle())
-            .dropIndicator(active: isTargeted && !isDragging, on: .top)
-            .dropDestination(for: String.self) { items, _ in
-                guard let id = items.first, id != template.id else { return false }
-                return onDrop(id)
-            } isTargeted: { isTargeted = $0 }
-            .allowsHitTesting(true)
-    }
-
-    /// Only the `≡` glyph is the drag source. Putting `.onDrag` on the whole
-    /// row hijacked toggle taps when the user clicked near the switch edge.
-    /// Scoping the gesture here also scopes the openHand cursor to the
-    /// handle, which is the standard macOS reorder affordance.
-    private var dragHandle: some View {
-        Image(systemName: "line.3.horizontal")
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(Theme.chromeMuted.opacity(0.7))
-            .frame(width: 22, height: 22)
-            .contentShape(Rectangle())
-            .onHover { hovering in
-                if hovering {
-                    NSCursor.openHand.push()
-                } else {
-                    NSCursor.pop()
-                }
-            }
-            .onDrag {
-                onBeginDrag()
-                return NSItemProvider(object: template.id as NSString)
-            }
-    }
 }
 
 /// Singleton NSWindowController so reopening Settings reuses the same window
@@ -1155,12 +1168,11 @@ private struct TerminalPresetRow: View {
     let onDelete: () -> Void
     let onBeginDrag: () -> Void
     let onDrop: (String) -> Bool
-    @State private var isTargeted = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 12) {
-                dragHandle
+                ReorderHandle(payload: id, onBeginDrag: onBeginDrag)
                 AgentIconView(
                     asset: AgentTemplate.terminal.iconAsset,
                     fallbackSymbol: AgentTemplate.terminal.symbol,
@@ -1179,7 +1191,7 @@ private struct TerminalPresetRow: View {
             }
             .padding(.horizontal, 22)
             .padding(.vertical, 10)
-            .background(dropZone)
+            .background(ReorderDropZone(row: id, isDragging: isDragging, decode: { $0 }, onDrop: onDrop))
             if isExpanded { expandedForm }
         }
         .opacity(isDragging ? 0.35 : 1.0)
@@ -1262,40 +1274,123 @@ private struct TerminalPresetRow: View {
         .padding(.trailing, 22)
     }
 
-    /// Drop catcher lives on a clear background so TextField hit-testing
-    /// stays independent — same lesson as `AgentRow.dropZone`. Without
-    /// that, dropping mid-row would route through whichever field happens
-    /// to live at the cursor instead of the row-level handler.
-    private var dropZone: some View {
-        Color.clear
-            .contentShape(Rectangle())
-            .dropIndicator(active: isTargeted && !isDragging, on: .top)
-            .dropDestination(for: String.self) { items, _ in
-                guard let droppedId = items.first, droppedId != id else { return false }
-                return onDrop(droppedId)
-            } isTargeted: { isTargeted = $0 }
-            .allowsHitTesting(true)
-    }
+}
 
-    /// Only the `≡` glyph is the drag source. Scoping `.onDrag` to the
-    /// handle keeps text-selection in the TextFields unaffected and
-    /// matches the openHand cursor convention used by AgentRow.
-    private var dragHandle: some View {
-        Image(systemName: "line.3.horizontal")
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(Theme.chromeMuted.opacity(0.7))
-            .frame(width: 22, height: 22)
-            .contentShape(Rectangle())
-            .onHover { hovering in
-                if hovering {
-                    NSCursor.openHand.push()
-                } else {
-                    NSCursor.pop()
+private struct StatusBarReorderList: View {
+    @Bindable var model: KookySettingsModel
+    @State private var draggingItem: StatusBarItemKind?
+    @State private var endTargeted: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(model.statusBarItems.enumerated()), id: \.element) { index, item in
+                if index > 0 { SettingsHairline() }
+                StatusBarRow(
+                    item: item,
+                    visible: !model.hiddenStatusBarItems.contains(item),
+                    isDragging: draggingItem == item,
+                    onToggleVisible: { toggleVisible(item) },
+                    onBeginDrag: { draggingItem = item },
+                    onDrop: { droppedItem in
+                        defer { draggingItem = nil }
+                        return reorder(draggedItem: droppedItem, before: item)
+                    }
+                )
+            }
+            Color.clear
+                .frame(height: 10)
+                .contentShape(Rectangle())
+                .dropIndicator(active: endTargeted, on: .top, offset: 4)
+                .dropDestination(for: String.self) { items, _ in
+                    defer { draggingItem = nil }
+                    guard let raw = items.first,
+                          let dropped = StatusBarItemKind(rawValue: raw) else { return false }
+                    return moveToEnd(dropped)
+                } isTargeted: { endTargeted = $0 }
+
+            HStack {
+                Spacer()
+                if hasCustomisation {
+                    Button("reset to defaults") { model.resetStatusBar() }
+                        .buttonStyle(.plain)
+                        .font(Theme.mono(11))
+                        .foregroundStyle(Theme.chromeMuted)
+                        .underline()
                 }
             }
-            .onDrag {
-                onBeginDrag()
-                return NSItemProvider(object: id as NSString)
-            }
+            .padding(.horizontal, 28)
+            .padding(.top, 14)
+        }
+    }
+
+    private var hasCustomisation: Bool {
+        model.statusBarItems != StatusBarItemKind.defaultOrder || !model.hiddenStatusBarItems.isEmpty
+    }
+
+    private func toggleVisible(_ item: StatusBarItemKind) {
+        if model.hiddenStatusBarItems.contains(item) {
+            model.hiddenStatusBarItems.remove(item)
+        } else {
+            model.hiddenStatusBarItems.insert(item)
+        }
+    }
+
+    private func reorder(draggedItem: StatusBarItemKind, before target: StatusBarItemKind) -> Bool {
+        var order = model.statusBarItems
+        guard let src = order.firstIndex(of: draggedItem),
+              let dst = order.firstIndex(of: target),
+              src != dst else { return false }
+        let moved = order.remove(at: src)
+        let adjusted = src < dst ? dst - 1 : dst
+        order.insert(moved, at: adjusted)
+        withAnimation(.easeInOut(duration: 0.18)) {
+            model.statusBarItems = order
+        }
+        return true
+    }
+
+    private func moveToEnd(_ item: StatusBarItemKind) -> Bool {
+        var order = model.statusBarItems
+        guard let src = order.firstIndex(of: item), src != order.count - 1 else { return false }
+        let moved = order.remove(at: src)
+        order.append(moved)
+        withAnimation(.easeInOut(duration: 0.18)) {
+            model.statusBarItems = order
+        }
+        return true
+    }
+}
+
+private struct StatusBarRow: View {
+    let item: StatusBarItemKind
+    let visible: Bool
+    let isDragging: Bool
+    let onToggleVisible: () -> Void
+    let onBeginDrag: () -> Void
+    let onDrop: (StatusBarItemKind) -> Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ReorderHandle(payload: item.rawValue, onBeginDrag: onBeginDrag)
+            Image(systemName: item.symbol)
+                .imageScale(.small)
+                .foregroundStyle(visible ? Theme.chromeForeground : Theme.chromeMuted)
+                .frame(width: 14)
+                .opacity(visible ? 1.0 : 0.4)
+            Text(item.displayName)
+                .font(Theme.mono(12.5))
+                .foregroundStyle(visible ? Theme.chromeForeground : Theme.chromeMuted)
+            Spacer(minLength: 14)
+            Toggle("", isOn: Binding(get: { visible }, set: { _ in onToggleVisible() }))
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .labelsHidden()
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 10)
+        .background(ReorderDropZone(row: item, isDragging: isDragging,
+                                    decode: StatusBarItemKind.init(rawValue:),
+                                    onDrop: onDrop))
+        .opacity(isDragging ? 0.35 : 1.0)
     }
 }
