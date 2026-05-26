@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.17.0 — 2026-05-26
+
+- **Theme picker** — choose a theme in Settings. Theme changes apply immediately across the terminal and the whole window.
+
 ## v0.16.3 — 2026-05-25
 
 - **Pane zoom (⌘⇧E)** — expand the active pane to fill the workspace; the other panes slide off-screen but their processes keep running. Toggle from ⌘⇧E, the zoom button in each pane's bottom status bar, the View menu, or right-click → "Zoom Pane".

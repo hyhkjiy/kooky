@@ -21,6 +21,13 @@ final class KookySettingsModel {
     /// silently shadow the user's `~/.config/ghostty/config` font-size.
     var fontSize: Int? = nil
     var cursorStyle: String = "block"
+    /// Picker selection for the terminal theme row. Values are one of:
+    /// `defaultThemeSelection`, `customThemeSelection`, or a bundled preset id.
+    var terminalThemeSelection: String = KookySettingsModel.defaultThemeSelection
+    /// Unknown raw `terminal.theme` values from hand-edited settings.json.
+    /// Kept so saving an unrelated Settings field doesn't delete a custom
+    /// Ghostty theme path/name that the picker cannot represent as a preset.
+    private var customTerminalThemeRawValue: String? = nil
 
     /// User-customised order for the `+` menu agent list (Terminal stays
     /// pinned first regardless). Empty = use `AgentTemplate.all` order.
@@ -83,6 +90,9 @@ final class KookySettingsModel {
             fontSize = Int(d)
         }
         cursorStyle = (terminal["cursor-style"] as? String) ?? "block"
+        let themeState = Self.themeSelection(for: terminal["theme"] as? String)
+        terminalThemeSelection = themeState.selection
+        customTerminalThemeRawValue = themeState.customRawValue
 
         let agents = parsed["agents"] as? [String: Any] ?? [:]
         agentOrder = (agents["order"] as? [String]) ?? []
@@ -175,11 +185,16 @@ final class KookySettingsModel {
     private func save() {
         var parsed = KookySettings.loadParsed() ?? [:]
         var terminal = parsed["terminal"] as? [String: Any] ?? [:]
+        let previousTerminal = terminal
         // Sentinel values (empty string / nil / "block") drop the key so
         // libghostty falls back to ghostty's own config or its own default.
         terminal["font-family"] = fontFamily.isEmpty ? nil : fontFamily
         terminal["font-size"] = fontSize
         terminal["cursor-style"] = cursorStyle == "block" ? nil : cursorStyle
+        terminal["theme"] = Self.persistedThemeValue(
+            selection: terminalThemeSelection,
+            customRawValue: customTerminalThemeRawValue
+        )
         parsed["terminal"] = terminal
 
         let nonEmptyOptions = agentOptions.filter { !$0.value.isEmpty }
@@ -243,6 +258,18 @@ final class KookySettingsModel {
 
         KookySettings.write(parsed)
         KookyShellIntegration.refreshClaudeCustomSettings(customAgents: customAgents)
+        // Theme-only diff is the trigger for chrome / window-appearance
+        // refresh — font and cursor changes also flow through `reloadConfig`
+        // so libghostty picks up the new values, but they don't change
+        // chrome tokens, so skip the window-appearance pass for them.
+        let themeChanged = (previousTerminal["theme"] as? String) != (terminal["theme"] as? String)
+        let terminalChanged = !NSDictionary(dictionary: previousTerminal).isEqual(to: terminal)
+        if terminalChanged {
+            LibghosttyApp.shared.reloadConfig()
+            if themeChanged {
+                (NSApp.delegate as? AppDelegate)?.refreshThemeAppearances()
+            }
+        }
     }
 
     func resetAgentCustomisation() {
@@ -252,6 +279,41 @@ final class KookySettingsModel {
         defaultAgentId = nil
         customAgents = []
         scheduleSave()
+    }
+
+    static let defaultThemeSelection = "__kooky-default-theme"
+    static let customThemeSelection = "__kooky-custom-theme"
+
+    var terminalThemePresetId: String? {
+        KookyTerminalTheme.preset(for: terminalThemeSelection)?.id
+    }
+
+    var customTerminalThemeLabel: String? {
+        guard let raw = customTerminalThemeRawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else { return nil }
+        return "Custom (\(raw))"
+    }
+
+    static func themeSelection(for rawTheme: String?) -> (selection: String, customRawValue: String?) {
+        guard let rawTheme,
+              !rawTheme.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return (defaultThemeSelection, nil)
+        }
+        if let preset = KookyTerminalTheme.preset(for: rawTheme) {
+            return (preset.id, nil)
+        }
+        return (customThemeSelection, rawTheme)
+    }
+
+    static func persistedThemeValue(selection: String, customRawValue: String?) -> String? {
+        if selection == defaultThemeSelection {
+            return nil
+        }
+        if selection == customThemeSelection {
+            let raw = customRawValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return raw.isEmpty ? nil : raw
+        }
+        return KookyTerminalTheme.preset(for: selection)?.id
     }
 
     /// Appends a new blank custom agent. The id is `custom-N`, the title is
@@ -346,10 +408,11 @@ struct KookySettingsView: View {
                 .frame(maxWidth: .infinity)
         }
         .background(Theme.chromeBackground)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.chromeColorScheme)
         .onChange(of: model.fontFamily) { _, _ in model.scheduleSave() }
         .onChange(of: model.fontSize) { _, _ in model.scheduleSave() }
         .onChange(of: model.cursorStyle) { _, _ in model.scheduleSave() }
+        .onChange(of: model.terminalThemeSelection) { _, _ in model.flushSave() }
         .onChange(of: model.agentOrder) { _, _ in model.scheduleSave() }
         .onChange(of: model.hiddenAgents) { _, _ in model.scheduleSave() }
         .onChange(of: model.agentOptions) { _, _ in model.scheduleSave() }
@@ -425,6 +488,10 @@ struct KookySettingsView: View {
 
     private var generalDetail: some View {
         VStack(alignment: .leading, spacing: 0) {
+            SettingsRow(label: "theme") {
+                themeControl
+            }
+            SettingsHairline()
             SettingsRow(label: "font-family") {
                 Picker("", selection: $model.fontFamily) {
                     Text("Default").tag("")
@@ -512,7 +579,7 @@ struct KookySettingsView: View {
 
     private var terminalRestartCallout: some View {
         HStack(spacing: 12) {
-            Text("Font and cursor changes apply on restart.")
+            Text("Theme reloads existing panes. Font and cursor changes may need restart.")
                 .font(Theme.mono(11.5))
                 .foregroundStyle(Theme.chromeMuted)
             Spacer()
@@ -545,6 +612,22 @@ struct KookySettingsView: View {
         ]
         try? task.run()
         NSApp.terminate(nil)
+    }
+
+    private var themeControl: some View {
+        Picker("", selection: $model.terminalThemeSelection) {
+            Text("Default").tag(KookySettingsModel.defaultThemeSelection)
+            if let customLabel = model.customTerminalThemeLabel {
+                Text(customLabel).tag(KookySettingsModel.customThemeSelection)
+            }
+            Divider()
+            ForEach(KookyTerminalTheme.presets) { preset in
+                Text(preset.title).tag(preset.id)
+            }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .frame(minWidth: 220)
     }
 
     /// Falls back to 13 when the user hasn't explicitly chosen a size —
@@ -957,9 +1040,7 @@ final class KookySettingsWindowController: NSWindowController {
         window.styleMask = [.titled, .closable]
         window.setContentSize(NSSize(width: 680, height: 460))
         window.isReleasedWhenClosed = false
-        // Match main-window chrome — forced dark so `Theme.chrome*` tokens
-        // render readably regardless of system appearance.
-        window.appearance = NSAppearance(named: .darkAqua)
+        window.appearance = Theme.windowAppearance
         self.window = window
     }
 

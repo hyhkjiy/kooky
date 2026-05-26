@@ -46,9 +46,7 @@ final class KookyWindowController: NSWindowController, NSWindowDelegate {
         // sidebar handle moves the window so tab DnD never races AppKit.
         window.isMovable = false
         window.isMovableByWindowBackground = false
-        // Force dark chrome regardless of system appearance — the terminal
-        // surface and sidebar are always dark.
-        window.appearance = NSAppearance(named: .darkAqua)
+        window.appearance = Theme.windowAppearance
         // The controller governs the window's lifetime; without this,
         // `close()` would also `release` it out from under the controller.
         window.isReleasedWhenClosed = false

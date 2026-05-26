@@ -34,30 +34,30 @@ final class LibghosttyApp {
             close_surface_cb: kookyCloseSurfaceCb
         )
 
-        let config = ghostty_config_new()
-        // Config precedence, last-write wins:
-        //   ghostty defaults → kooky baselines → ~/.kooky/settings.json
-        // So user's kooky settings beat both, and kooky baselines fill in
-        // features we want on by default (e.g. `cursor-click-to-move`)
-        // without forcing users to edit their ghostty config.
-        ghostty_config_load_default_files(config)
-        // Click anywhere on the current zsh / bash prompt to jump the
-        // shell cursor there — requires the OSC 133 prompt marker our
-        // wrapper rc already emits with the `cl=line` metadata libghostty
-        // needs to recognise it.
-        let baseline = "cursor-click-to-move = true\n"
-        baseline.withCString { cstr in
-            "kooky-baseline".withCString { source in
-                ghostty_config_load_string(config, cstr, UInt(strlen(cstr)), source)
-            }
+        guard let config = KookySettings.makeGhosttyConfig() else {
+            NSLog("kooky: ghostty_config_new failed")
+            return
         }
-        KookySettings.apply(to: config)
-        ghostty_config_finalize(config)
-
         self.app = ghostty_app_new(&runtime, config)
         if self.app == nil {
             NSLog("kooky: ghostty_app_new failed")
         }
+    }
+
+    func reloadConfig() {
+        guard let app else { return }
+        // Parse settings.json + load ghostty defaults once for the entire
+        // reload — `makeGhosttyConfig` is called once per ghostty receiver
+        // (app + each surface) but they all need an identical config, so
+        // share the parsed kooky-side dict to avoid N+1 disk reads + JSON
+        // parses for a window with many panes.
+        let parsed = KookySettings.loadParsed()
+        guard let config = KookySettings.makeGhosttyConfig(parsed: parsed) else {
+            NSLog("kooky: ghostty_config_new failed during reload")
+            return
+        }
+        ghostty_app_update_config(app, config)
+        GhosttySurfaceRegistry.updateAll(parsed: parsed)
     }
 
     func tick() {
@@ -303,6 +303,24 @@ final class LibghosttyEngine: TerminalEngine {
     }
 }
 
+@MainActor
+private enum GhosttySurfaceRegistry {
+    // `NSHashTable.weakObjects()` handles weak storage + compaction
+    // internally — every `register` is O(1), and dead refs disappear on
+    // their own (no manual `filter`).
+    private static let views: NSHashTable<GhosttySurfaceView> = .weakObjects()
+
+    static func register(_ view: GhosttySurfaceView) {
+        views.add(view)
+    }
+
+    static func updateAll(parsed: [String: Any]?) {
+        for view in views.allObjects {
+            view.updateConfigFromSettings(parsed: parsed)
+        }
+    }
+}
+
 // MARK: - GhosttySurfaceView
 
 /// AppKit host view that libghostty renders into directly. The view's pointer
@@ -354,6 +372,7 @@ final class GhosttySurfaceView: NSView {
         ScrollIndicator.install(scrollIndicator, in: self)
         updateTrackingAreas()
         wireScrollDrag()
+        GhosttySurfaceRegistry.register(self)
         // Accept Finder-style file drops — the user drags a file or folder
         // onto the terminal pane and we inject its backslash-escaped
         // absolute path (or paths, space-separated) as if it were pasted.
@@ -532,6 +551,16 @@ final class GhosttySurfaceView: NSView {
         surface = new
         pendingConfig = nil
         ghostty_surface_refresh(new)
+    }
+
+    func updateConfigFromSettings(parsed: [String: Any]?) {
+        guard let surface else { return }
+        guard let config = KookySettings.makeGhosttyConfig(parsed: parsed) else {
+            NSLog("kooky: ghostty_config_new failed during surface reload")
+            return
+        }
+        ghostty_surface_update_config(surface, config)
+        ghostty_surface_refresh(surface)
     }
 
     private func startDrawTimer() {

@@ -163,7 +163,7 @@ struct CommandPaletteView: View {
         // contentRect width entirely.
         .frame(width: 720)
         .background(Theme.chromeBackground)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.chromeColorScheme)
         .onAppear {
             focusField = true
             results = PaletteIndex.match(query: query, in: items)
@@ -307,7 +307,7 @@ final class CommandPaletteWindowController: NSWindowController {
         panel.hidesOnDeactivate = true
         panel.level = .floating
         panel.isReleasedWhenClosed = false
-        panel.appearance = NSAppearance(named: .darkAqua)
+        panel.appearance = Theme.windowAppearance
         self.init(window: panel)
         NotificationCenter.default.addObserver(
             self, selector: #selector(panelResignedKey(_:)),

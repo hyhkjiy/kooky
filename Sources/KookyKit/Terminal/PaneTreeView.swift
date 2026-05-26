@@ -725,6 +725,7 @@ private struct KookyMenuList<Content: View>: View {
 }
 
 @ViewBuilder
+@MainActor
 private func menuRowCheckmark(visible: Bool) -> some View {
     if visible {
         Image(systemName: "checkmark")

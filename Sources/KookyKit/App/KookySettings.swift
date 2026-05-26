@@ -40,7 +40,7 @@ enum KookySettings {
       "terminal": {
         // "font-family": "JetBrains Mono",
         // "font-size": 13,
-        // "theme": "Dracula"
+        // "theme": "dracula"
       }
     }
     """
@@ -61,20 +61,63 @@ enum KookySettings {
     /// Translates the `terminal.*` subdict to ghostty's flat key=value format
     /// and pushes via `ghostty_config_load_string`. Called after
     /// `ghostty_config_load_default_files` so user's kooky-side keys win over
-    /// anything in `~/.config/ghostty/config`.
-    static func apply(to config: ghostty_config_t?) {
+    /// anything in `~/.config/ghostty/config`. Theme lines emit first; any
+    /// user-set `terminal.cursor-color` / `background` / `palette` override
+    /// per ghostty last-write-wins.
+    static func apply(parsed: [String: Any]?, to config: ghostty_config_t?) {
         guard let config,
-              let parsed = loadParsed(),
+              let parsed,
               let terminal = parsed["terminal"] as? [String: Any],
               !terminal.isEmpty else { return }
-        let lines = terminal.flatMap { (key, value) -> [String] in
-            formatGhosttyLines(key: key, value: value)
+        var lines: [String] = []
+        if let rawTheme = terminal["theme"] as? String {
+            if let preset = KookyTerminalTheme.preset(for: rawTheme) {
+                lines.append(contentsOf: preset.lines)
+            } else if !rawTheme.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // Raw JSON users can still point at a custom Ghostty theme
+                // path or name. The Settings UI only writes bundled preset ids.
+                lines.append(contentsOf: formatGhosttyLines(key: "theme", value: rawTheme))
+            }
+        }
+        for key in terminal.keys.sorted() where key != "theme" {
+            if let value = terminal[key] {
+                lines.append(contentsOf: formatGhosttyLines(key: key, value: value))
+            }
         }
         let text = lines.joined(separator: "\n")
         guard !text.isEmpty else { return }
         text.withCString { cstr in
             "kooky-settings".withCString { sourceName in
                 ghostty_config_load_string(config, cstr, UInt(strlen(cstr)), sourceName)
+            }
+        }
+    }
+
+    /// Builds the full libghostty configuration used at app start and for
+    /// runtime reloads. Keep this as the single source for precedence:
+    /// ghostty defaults -> kooky baselines -> ~/.kooky/settings.json.
+    /// Pass `parsed` when the caller already loaded settings.json (e.g.
+    /// `LibghosttyApp.reloadConfig` building one config per surface) to
+    /// avoid re-reading the file N times.
+    static func makeGhosttyConfig(parsed: [String: Any]? = nil) -> ghostty_config_t? {
+        let config = ghostty_config_new()
+        guard config != nil else { return nil }
+        ghostty_config_load_default_files(config)
+        applyBaseline(to: config)
+        apply(parsed: parsed ?? loadParsed(), to: config)
+        ghostty_config_finalize(config)
+        return config
+    }
+
+    private static func applyBaseline(to config: ghostty_config_t?) {
+        guard let config else { return }
+        // Click anywhere on the current zsh / bash prompt to jump the shell
+        // cursor there. The shell wrapper emits OSC 133 prompt markers with
+        // the `cl=line` metadata libghostty needs to recognise it.
+        let baseline = "cursor-click-to-move = true\n"
+        baseline.withCString { cstr in
+            "kooky-baseline".withCString { source in
+                ghostty_config_load_string(config, cstr, UInt(strlen(cstr)), source)
             }
         }
     }

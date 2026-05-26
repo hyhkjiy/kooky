@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Brutalist update prompt — matches the Settings window's visual language:
-/// dark Theme.chrome* tokens, mono kebab-case labels, sharp corners, 1pt
+/// Theme.chrome* tokens, mono kebab-case labels, sharp corners, 1pt
 /// hairlines, BracketButton actions. Replaces the system NSAlert so the
 /// "Check for Updates…" flow doesn't fall out of kooky's design system.
 struct UpdatePromptView: View {
@@ -38,7 +38,7 @@ struct UpdatePromptView: View {
         .padding(.bottom, 22)
         .frame(width: 460, alignment: .topLeading)
         .background(Theme.chromeBackground)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.chromeColorScheme)
     }
 
     // MARK: Sections
@@ -167,7 +167,7 @@ final class UpdatePromptWindowController: NSWindowController {
             new.title = "Update"
             new.styleMask = [.titled, .closable]
             new.isReleasedWhenClosed = false
-            new.appearance = NSAppearance(named: .darkAqua)
+            new.appearance = Theme.windowAppearance
             self.window = new
         }
     }

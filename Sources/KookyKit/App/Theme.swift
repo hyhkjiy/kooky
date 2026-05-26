@@ -2,24 +2,91 @@ import AppKit
 import SwiftUI
 
 /// Design tokens for kooky's chrome — refined minimal, low-contrast palette,
-/// generous rhythm. Terminal content (libghostty) renders independently.
+/// generous rhythm. The terminal theme is the source for the whole window:
+/// libghostty gets concrete color config, while SwiftUI chrome derives its
+/// own readable foreground / muted / hairline tokens from the same preset.
+@MainActor
 enum Theme {
     // MARK: Colors
-    // Slightly cooler than One Dark; sits ~1 step deeper than terminal #282C34
-    // so the chrome reads as background and the surface stays the focal plane.
-    static let chromeBackground = Color(nsColor: NSColor(srgbRed: 0x1B / 255, green: 0x1D / 255, blue: 0x22 / 255, alpha: 1))
-    static let chromeForeground = Color(nsColor: NSColor(srgbRed: 0xEF / 255, green: 0xEF / 255, blue: 0xF1 / 255, alpha: 1))
-    static let chromeMuted = Color(nsColor: NSColor(srgbRed: 0x93 / 255, green: 0x95 / 255, blue: 0x9C / 255, alpha: 1))
-    static let chromeFaint = Color(nsColor: NSColor(srgbRed: 0x5C / 255, green: 0x5E / 255, blue: 0x66 / 255, alpha: 1))
-    static let chromeHairline = Color.white.opacity(0.05)
-    static let chromeHover = Color.white.opacity(0.04)
-    static let chromeActive = Color.white.opacity(0.08)
 
-    /// Color libghostty draws inside the terminal surface (One Dark #282C34).
-    /// Distinct from `chromeBackground` — the terminal owns its own canvas;
-    /// chrome wraps it. Exposed as NSColor so AppKit code (engines, etc.)
-    /// can reach it without bridging.
-    static let terminalSurface = NSColor(srgbRed: 40 / 255, green: 44 / 255, blue: 52 / 255, alpha: 1)
+    static var chromeBackground: Color { Color(nsColor: resolved.chromeBackgroundColor) }
+    static var chromeForeground: Color { Color(nsColor: resolved.foregroundColor) }
+    static var chromeMuted: Color { resolved.chromeMuted }
+    static var chromeFaint: Color { resolved.chromeFaint }
+    static var chromeHairline: Color { resolved.chromeHairline }
+    static var chromeHover: Color { resolved.chromeHover }
+    static var chromeActive: Color { resolved.chromeActive }
+
+    /// Color libghostty draws inside the terminal surface. Exposed as NSColor
+    /// so AppKit code (engines, etc.) can reach it without bridging.
+    static var terminalSurface: NSColor { resolved.backgroundColor }
+
+    static var chromeColorScheme: ColorScheme { resolved.isLight ? .light : .dark }
+
+    static var windowAppearance: NSAppearance? {
+        NSAppearance(named: resolved.isLight ? .aqua : .darkAqua)
+    }
+
+    /// `Theme.resolved` reads `KookySettingsModel.shared.terminalThemePresetId` so
+    /// SwiftUI's `@Observable` machinery registers the dependency on every
+    /// body that touches a chrome token — without that read, body
+    /// re-evaluation wouldn't fire on a theme switch. The cache (keyed by
+    /// the resolved id) skips the expensive work (linear preset scan +
+    /// hex parse + sRGB color-space conversion + `mix` math, ×7 tokens)
+    /// when the id is unchanged, so most SwiftUI renders pay just one
+    /// `@Observable` read + one optional-string `==`.
+    static var resolved: Resolved {
+        let id = KookySettingsModel.shared.terminalThemePresetId
+        if let cached = cachedResolved, cached.themeId == id { return cached }
+        let next = Resolved(themeId: id)
+        cachedResolved = next
+        return next
+    }
+    private static var cachedResolved: Resolved?
+
+    /// Snapshot of every token derived from one terminal theme. Computed once
+    /// and reused until the theme id changes — see `Theme.resolved`.
+    struct Resolved {
+        let themeId: String?
+        let backgroundColor: NSColor
+        let foregroundColor: NSColor
+        let chromeBackgroundColor: NSColor
+        let isLight: Bool
+        let chromeMuted: Color
+        let chromeFaint: Color
+        let chromeHairline: Color
+        let chromeHover: Color
+        let chromeActive: Color
+
+        @MainActor
+        fileprivate init(themeId: String?) {
+            self.themeId = themeId
+            let preset = themeId.flatMap { KookyTerminalTheme.preset(for: $0) }
+            self.backgroundColor = preset.flatMap { NSColor(hex: $0.backgroundHex) } ?? defaultTerminalSurface
+            self.foregroundColor = preset.flatMap { NSColor(hex: $0.foregroundHex) } ?? defaultForeground
+            self.isLight = backgroundColor.relativeLuminance > 0.55
+            // Chrome sits one step off the surface so the terminal reads as
+            // the framed canvas. Dark themes nudge toward black, light
+            // themes toward the ink — keeps the chrome readable on each.
+            self.chromeBackgroundColor = isLight
+                ? mix(backgroundColor, foregroundColor, 0.035)
+                : mix(backgroundColor, sRGBBlack, 0.16)
+            let mutedNS = mix(foregroundColor, chromeBackgroundColor, isLight ? 0.42 : 0.52)
+            let faintNS = mix(foregroundColor, chromeBackgroundColor, isLight ? 0.68 : 0.72)
+            let fgColor = Color(nsColor: foregroundColor)
+            self.chromeMuted = Color(nsColor: mutedNS)
+            self.chromeFaint = Color(nsColor: faintNS)
+            self.chromeHairline = fgColor.opacity(isLight ? 0.16 : 0.07)
+            self.chromeHover = fgColor.opacity(isLight ? 0.08 : 0.05)
+            self.chromeActive = fgColor.opacity(isLight ? 0.14 : 0.10)
+        }
+    }
+
+    private static let defaultTerminalSurface = NSColor(srgbRed: 40 / 255, green: 44 / 255, blue: 52 / 255, alpha: 1)
+    private static let defaultForeground = NSColor(srgbRed: 0xEF / 255, green: 0xEF / 255, blue: 0xF1 / 255, alpha: 1)
+    /// `NSColor.black` lives in `NSDeviceRGBColorSpace`; bridging to sRGB
+    /// on every `mix(_, .black, _)` call is wasted work. Pre-convert once.
+    private static let sRGBBlack = NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)
 
     /// Activity-dot palette — one design token per signal so sidebar workspace
     /// rows and tab pills read identically. Hue picked for at-a-glance read:
@@ -58,6 +125,22 @@ enum Theme {
     /// Standard transition for chrome state changes (sidebar collapse,
     /// drag-reorder commit). One source so timings can't drift across sites.
     static let chromeTransition: Animation = .easeInOut(duration: 0.2)
+
+}
+
+/// Linear interpolation between two NSColors in sRGB. Module-internal so
+/// `Theme.Resolved.init` can reach it without going through `Theme.` (the
+/// init is fileprivate already so the helper doesn't need to escape).
+private func mix(_ a: NSColor, _ b: NSColor, _ amount: CGFloat) -> NSColor {
+    let ca = a.usingColorSpace(.sRGB) ?? a
+    let cb = b.usingColorSpace(.sRGB) ?? b
+    let t = max(0, min(1, amount))
+    return NSColor(
+        srgbRed: ca.redComponent * (1 - t) + cb.redComponent * t,
+        green: ca.greenComponent * (1 - t) + cb.greenComponent * t,
+        blue: ca.blueComponent * (1 - t) + cb.blueComponent * t,
+        alpha: ca.alphaComponent * (1 - t) + cb.alphaComponent * t
+    )
 }
 
 // MARK: - Brutalist primitives
@@ -134,18 +217,42 @@ func bundleResourceURL(name: String, ext: String, subdirectory: String) -> URL? 
     return nil
 }
 
+/// Parses `#RRGGBB` / `RRGGBB` into sRGB components, or nil for malformed
+/// input. Single source for both `Color(hex:)` and `NSColor(hex:)` so any
+/// future tolerance changes (e.g. `#RGB` short-form) land in one place.
+private func parseHexRGB(_ hex: String) -> (r: Double, g: Double, b: Double)? {
+    var s = hex
+    if s.hasPrefix("#") { s.removeFirst() }
+    guard s.count == 6, let v = UInt32(s, radix: 16) else { return nil }
+    return (
+        Double((v >> 16) & 0xFF) / 255,
+        Double((v >> 8) & 0xFF) / 255,
+        Double(v & 0xFF) / 255
+    )
+}
+
 extension Color {
     /// `Color(hex: "D97757")` or `Color(hex: "#D97757")`. Returns nil for
     /// malformed input so callers can fall back deterministically.
     init?(hex: String) {
-        var s = hex
-        if s.hasPrefix("#") { s.removeFirst() }
-        guard s.count == 6, let v = UInt32(s, radix: 16) else { return nil }
-        self.init(
-            .sRGB,
-            red: Double((v >> 16) & 0xFF) / 255,
-            green: Double((v >> 8) & 0xFF) / 255,
-            blue: Double(v & 0xFF) / 255
-        )
+        guard let rgb = parseHexRGB(hex) else { return nil }
+        self.init(.sRGB, red: rgb.r, green: rgb.g, blue: rgb.b)
+    }
+}
+
+extension NSColor {
+    convenience init?(hex: String) {
+        guard let rgb = parseHexRGB(hex) else { return nil }
+        self.init(srgbRed: CGFloat(rgb.r), green: CGFloat(rgb.g), blue: CGFloat(rgb.b), alpha: 1)
+    }
+
+    var relativeLuminance: CGFloat {
+        let c = usingColorSpace(.sRGB) ?? self
+        func channel(_ value: CGFloat) -> CGFloat {
+            value <= 0.03928 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * channel(c.redComponent)
+            + 0.7152 * channel(c.greenComponent)
+            + 0.0722 * channel(c.blueComponent)
     }
 }

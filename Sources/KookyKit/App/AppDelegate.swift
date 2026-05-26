@@ -165,6 +165,21 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     /// most-recently-key kooky window; nil only when no kooky window exists.
     private var activeStore: WorkspaceStore? { activeController?.store }
 
+    /// Re-applies `Theme.windowAppearance` to every kooky-owned window so a
+    /// theme switch flips title bar / traffic lights / sheets in lockstep
+    /// with the SwiftUI chrome. Enumerated rather than walking `NSApp.windows`
+    /// because the latter touches system-spawned panels (alerts, color
+    /// pickers) that aren't ours.
+    func refreshThemeAppearances() {
+        let appearance = Theme.windowAppearance
+        for controller in windowControllers {
+            controller.window?.appearance = appearance
+        }
+        KookySettingsWindowController.shared.window?.appearance = appearance
+        UpdatePromptWindowController.shared.window?.appearance = appearance
+        CommandPaletteWindowController.shared.window?.appearance = appearance
+    }
+
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
     }
