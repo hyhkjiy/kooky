@@ -583,6 +583,100 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertEqual(ws.title, "corey@web-prod: ~/srv")
     }
 
+    func testAgentStatusTitleMarkerSurfacesRemoteAgentWithoutChangingLaunchTemplate() {
+        let persistence = InMemoryPersistence()
+        let store = WorkspaceStore(
+            persistence: persistence,
+            engineFactory: { TestEngine() },
+            optionsProvider: { _ in nil },
+            resumeProvider: { true }
+        )
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let session = firstPane(ws).tabs[0]
+
+        engine(session).emitTitle(AgentStatusMarker.title(slug: "claude", event: .running))
+
+        XCTAssertEqual(session.agent.id, AgentTemplate.terminal.id)
+        XCTAssertEqual(session.displayAgent.id, AgentTemplate.claudeCode.id)
+        XCTAssertEqual(session.activityState, .running)
+        XCTAssertNil(session.terminalTitle)
+        XCTAssertEqual(ws.distinctAgents.map(\.id), [AgentTemplate.claudeCode.id])
+
+        store.flushPersistence()
+        guard case .pane(let persistedPane)? = persistence.saved?.workspaces.last?.root.kind else {
+            return XCTFail("expected single-pane persisted workspace")
+        }
+        XCTAssertEqual(persistedPane.tabs.first?.agentId, AgentTemplate.terminal.id)
+
+        engine(session).emitTitle(AgentStatusMarker.title(slug: "claude", event: .ended))
+
+        XCTAssertNil(session.transientAgent)
+        XCTAssertEqual(session.displayAgent.id, AgentTemplate.terminal.id)
+        XCTAssertEqual(session.activityState, .idle)
+        XCTAssertTrue(ws.distinctAgents.isEmpty)
+    }
+
+    func testAgentStatusTitleMarkerDoesNotReplaceRemoteShellTitle() {
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let session = firstPane(ws).tabs[0]
+
+        engine(session).emitTitle("corey@web-prod: ~/srv")
+        engine(session).emitTitle(AgentStatusMarker.title(slug: "codex", event: .running))
+
+        XCTAssertEqual(session.terminalTitle, "corey@web-prod: ~/srv")
+        XCTAssertEqual(session.title, "corey@web-prod: ~/srv")
+        XCTAssertEqual(session.displayAgent.id, AgentTemplate.codex.id)
+        XCTAssertEqual(ws.distinctAgents.map(\.id), [AgentTemplate.codex.id])
+    }
+
+    func testUnknownAgentStatusMarkerIsIgnoredInsteadOfBecomingTitle() {
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let session = firstPane(ws).tabs[0]
+
+        engine(session).emitTitle("kooky-agent:not-real:running")
+
+        XCTAssertNil(session.terminalTitle)
+        XCTAssertEqual(session.displayAgent.id, AgentTemplate.terminal.id)
+        XCTAssertTrue(ws.distinctAgents.isEmpty)
+    }
+
+    func testAgentStatusEndedRevertsPromotedAgentEvenWhenTransientMarkerExists() {
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let session = firstPane(ws).tabs[0]
+
+        engine(session).emitTitle(AgentStatusMarker.title(slug: "claude", event: .running))
+        store.applyHookEvent(agent: .claudeCode, event: .running, sessionId: session.id)
+        engine(session).emitTitle(AgentStatusMarker.title(slug: "claude", event: .ended))
+
+        XCTAssertNil(session.transientAgent)
+        XCTAssertEqual(session.agent.id, AgentTemplate.terminal.id)
+        XCTAssertEqual(session.displayAgent.id, AgentTemplate.terminal.id)
+    }
+
+    func testTransientAgentClearedWhenLocalCommandFinishes() {
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let session = firstPane(ws).tabs[0]
+
+        // A remote agent surfaces via an OSC marker (ssh session running codex).
+        engine(session).emitTitle(AgentStatusMarker.title(slug: "codex", event: .running))
+        XCTAssertEqual(session.displayAgent.id, AgentTemplate.codex.id)
+        XCTAssertEqual(session.activityState, .running)
+
+        // The ssh drops with no `ended` marker — the local command (the ssh
+        // itself) returning to the prompt is the fallback "remote session over"
+        // signal, and must clear the stale transient promotion + activity dot.
+        engine(session).emitCommandFinished(exit: 0, duration: 1)
+
+        XCTAssertNil(session.transientAgent)
+        XCTAssertEqual(session.displayAgent.id, AgentTemplate.terminal.id)
+        XCTAssertEqual(session.activityState, .idle)
+        XCTAssertTrue(ws.distinctAgents.isEmpty)
+    }
+
     func testCustomTitleWinsOverTerminalTitle() {
         let store = makeStore()
         let ws = store.addWorkspace(workingDirectory: projectA)

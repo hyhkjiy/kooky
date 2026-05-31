@@ -269,6 +269,11 @@ enum KookyShellIntegration {
             "KOOKY_HOOKS_PATH": hooksPath,
             "KOOKY_BIN_DIR": kookyBinDirectory,
             "KOOKY_HOOK_BIN": kookyHookBinaryPath,
+            // KOOKY_AGENT_MARKERS is deliberately NOT set locally: the
+            // KookyHook socket is the local status channel. OSC-title markers
+            // are the ssh-remote fallback (the remote bootstrap exports the
+            // var there), so emitting them locally would double-report and
+            // risk leaking OSC bytes into a redirected agent's stdout.
             "PATH": "\(kookyBinDirectory):\(parentPath)",
             // Gemini CLI loads this as the lowest-precedence settings tier,
             // but its hooks arrays use CONCAT-merge — so our entries fire
@@ -294,7 +299,7 @@ enum KookyShellIntegration {
     /// Writes wrapper shims, hook configs, and the OpenCode plugin to disk.
     /// Idempotent — call on every app launch so each agent's hook command
     /// tracks the latest `KookyHook` location.
-    static func installAgentHooks() {
+    static func installAgentHooks(sshRemoteAgentDetection: Bool = false) {
         writeWrapper(name: "claude", script: claudeWrapperScript)
         writeWrapper(name: "codex", script: codexWrapperScript)
         // Gemini doesn't need a wrapper — `GEMINI_CLI_SYSTEM_SETTINGS_PATH`
@@ -306,6 +311,7 @@ enum KookyShellIntegration {
         writeWrapper(name: "grok", script: bracketWrapperScript(slug: "grok"))
         writeWrapper(name: "agy", script: antigravityWrapperScript)
         writeWrapper(name: "kimi", script: bracketWrapperScript(slug: "kimi"))
+        refreshSshRemoteAgentDetection(enabled: sshRemoteAgentDetection)
 
         let hookCmd = kookyHookBinaryPath
         writeJSON(at: claudeHooksPath, object: claudeHooksObject(hookCmd: hookCmd))
@@ -322,6 +328,17 @@ enum KookyShellIntegration {
         // Gemini we can't point it at a kooky-owned defaults file, and unlike
         // Copilot it has no per-event hooks directory; the bracket wrapper
         // gives running/ended until a config.toml-merge path exists.
+    }
+
+    static func refreshSshRemoteAgentDetection(enabled: Bool) {
+        if enabled {
+            writeWrapper(name: "ssh", script: sshWrapperScript)
+        } else {
+            removeManagedWrapper(
+                name: "ssh",
+                markers: ["KOOKY_DISABLE_SSH_AGENT_MARKERS", "kooky-agent-markers"]
+            )
+        }
     }
 
     /// Writes the Copilot hooks JSON only when the user already has a
@@ -548,6 +565,29 @@ enum KookyShellIntegration {
         chmod(path, 0o755)
     }
 
+    private static func removeManagedWrapper(name: String, markers: [String]) {
+        let path = (kookyBinDirectory as NSString).appendingPathComponent(name)
+        guard let contents = try? String(contentsOfFile: path, encoding: .utf8) else { return }
+        guard markers.allSatisfy({ contents.contains($0) }) else { return }
+        try? FileManager.default.removeItem(atPath: path)
+    }
+
+    /// OSC-2 status marker, gated and tty-targeted. Fires only when
+    /// `KOOKY_AGENT_MARKERS` is set — ssh remotes export it, local sessions
+    /// don't (they report through the KookyHook socket), so the local bracket
+    /// wrappers stay silent and never double-report. Writes to `/dev/tty`, not
+    /// stdout: a redirected agent (`claude -p … > out`) must not get OSC bytes
+    /// in its output, and the marker must still reach the terminal when the
+    /// agent's stdout is a pipe.
+    private static func agentMarkerCommand(slug: String, event: HookEvent) -> String {
+        "[[ -n \"$KOOKY_AGENT_MARKERS\" ]] && printf '\\033]2;\(AgentStatusMarker.title(slug: slug, event: event))\\a' > /dev/tty 2>/dev/null"
+    }
+
+    private static let remoteAgentMarkerSlugs = [
+        "claude", "codex", "gemini", "opencode", "amp",
+        "cursor-agent", "copilot", "grok", "agy", "kimi",
+    ]
+
     /// Common bash header for every wrapper: locate the real binary on
     /// `$PATH` skipping our own dir, abort if missing.
     private static func wrapperPreamble(binary: String) -> String {
@@ -570,6 +610,9 @@ enum KookyShellIntegration {
             # The new-tab path eagerly sets session.agent based on the template,
             # expecting bracket wrapper to ping `running` next. We never got
             # there — revert the icon so it doesn't lie about what's running.
+            if [[ -n "$KOOKY_SURFACE_ID" || -n "$KOOKY_AGENT_MARKERS" ]]; then
+                \(agentMarkerCommand(slug: binary, event: .ended))
+            fi
             if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" ]]; then
                 "$KOOKY_HOOK_BIN" \(binary) ended 2>/dev/null
             fi
@@ -580,12 +623,22 @@ enum KookyShellIntegration {
 
     /// Inside a kooky session ($KOOKY_SURFACE_ID set), injects --settings so
     /// Claude Code's hooks report state back to the app via the bundled
-    /// KookyHook helper. Outside, transparent passthrough.
+    /// KookyHook helper. `KOOKY_AGENT_MARKERS` enables the OSC-title fallback
+    /// for remote shells that can write terminal bytes but cannot reach the
+    /// local unix socket. Outside both, transparent passthrough.
     private static let claudeWrapperScript = """
     \(wrapperPreamble(binary: "claude"))
 
-    if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOKS_PATH" ]]; then
-        exec "$real" --settings "$KOOKY_HOOKS_PATH" "$@"
+    if [[ -n "$KOOKY_SURFACE_ID" || -n "$KOOKY_AGENT_MARKERS" ]]; then
+        \(agentMarkerCommand(slug: "claude", event: .running))
+        if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOKS_PATH" ]]; then
+            "$real" --settings "$KOOKY_HOOKS_PATH" "$@"
+        else
+            "$real" "$@"
+        fi
+        status=$?
+        \(agentMarkerCommand(slug: "claude", event: .ended))
+        exit $status
     fi
     exec "$real" "$@"
     """
@@ -599,20 +652,212 @@ enum KookyShellIntegration {
     private static let codexWrapperScript = """
     \(wrapperPreamble(binary: "codex"))
 
-    if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" ]]; then
+    if [[ -n "$KOOKY_SURFACE_ID" || -n "$KOOKY_AGENT_MARKERS" ]]; then
         # Codex doesn't expose SessionStart / SessionEnd lifecycle hooks
         # we can override per-invocation. Bracket the run from the wrapper:
         # send `running` before codex starts (immediate icon promotion),
         # then `ended` after exit (revert to terminal). Mid-run state
         # transitions still come from Codex's `notify` config below.
-        "$KOOKY_HOOK_BIN" codex running 2>/dev/null
-        "$real" -c "notify=[\\"$KOOKY_HOOK_BIN\\",\\"codex\\",\\"attention\\"]" "$@"
+        \(agentMarkerCommand(slug: "codex", event: .running))
+        if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" ]]; then
+            "$KOOKY_HOOK_BIN" codex running 2>/dev/null
+            "$real" -c "notify=[\\"$KOOKY_HOOK_BIN\\",\\"codex\\",\\"attention\\"]" "$@"
+        else
+            "$real" "$@"
+        fi
         status=$?
-        "$KOOKY_HOOK_BIN" codex ended 2>/dev/null
+        if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" ]]; then
+            "$KOOKY_HOOK_BIN" codex ended 2>/dev/null
+        fi
+        \(agentMarkerCommand(slug: "codex", event: .ended))
         exit $status
     fi
     exec "$real" "$@"
     """
+
+    /// SSH is the one common path where the agent runs outside kooky's local
+    /// process tree. For a plain interactive `ssh host`, inject a temporary
+    /// remote shell session whose PATH starts with marker-emitting wrappers.
+    /// Cases where SSH is used as transport (`git`, `scp`, `ssh host cmd`,
+    /// port forwards, config dumps) pass through untouched.
+    static let sshWrapperScript: String = {
+        let remoteCommand = "sh -lc \(quote(remoteAgentBootstrapScript))"
+        return """
+        \(wrapperPreamble(binary: "ssh"))
+
+        if [[ -n "${KOOKY_DISABLE_SSH_AGENT_MARKERS:-}" || ! -t 0 || ! -t 1 ]]; then
+            exec "$real" "$@"
+        fi
+
+        args=("$@")
+        skip_next=0
+        destination_seen=0
+        remote_command_seen=0
+        for ((i = 0; i < ${#args[@]}; i++)); do
+            arg="${args[$i]}"
+            if (( skip_next )); then
+                skip_next=0
+                continue
+            fi
+            if (( ! destination_seen )); then
+                if [[ "$arg" == "--" ]]; then
+                    ((i++))
+                    [[ $i -lt ${#args[@]} ]] || exec "$real" "$@"
+                    destination_seen=1
+                    continue
+                fi
+                if [[ "$arg" == -* && "$arg" != "-" ]]; then
+                    # `-o RemoteCommand=…` (attached or as the next arg) means the
+                    # user already supplies the remote command — pass through like
+                    # `ssh host cmd` instead of clobbering it with our bootstrap.
+                    o_value=""
+                    if [[ "$arg" == "-o" ]]; then
+                        o_value="${args[$((i + 1))]:-}"
+                    elif [[ "$arg" == -o?* ]]; then
+                        o_value="${arg#-o}"
+                    fi
+                    case "$o_value" in
+                        [Rr]emote[Cc]ommand*) exec "$real" "$@" ;;
+                    esac
+                    # Walk the short-option group left to right. A no-remote-shell
+                    # flag (N/T/V/G/Q/O/W) — even bundled, e.g. `-fN` for a port
+                    # forward — means this isn't an interactive login, so pass
+                    # through. Stop at the first argument-taking option: the rest
+                    # of the group (or the next arg, via skip_next) is its value.
+                    group="${arg#-}"
+                    c=0
+                    while (( c < ${#group} )); do
+                        case "${group:c:1}" in
+                            [NTVGQOW]) exec "$real" "$@" ;;
+                            [BbcDEeFIiJLlmOopQRSWw])
+                                (( c == ${#group} - 1 )) && skip_next=1
+                                break
+                                ;;
+                        esac
+                        (( c++ ))
+                    done
+                    continue
+                fi
+                destination_seen=1
+                continue
+            fi
+            remote_command_seen=1
+            break
+        done
+
+        if (( ! destination_seen || remote_command_seen )); then
+            exec "$real" "$@"
+        fi
+
+        remote_command=\(quote(remoteCommand))
+        exec "$real" -t "$@" "$remote_command"
+        """
+    }()
+
+    /// Remote-side bootstrap used only by `sshWrapperScript`. It writes wrapper
+    /// binaries into a temp dir on the remote, then starts the user's shell
+    /// with that dir prepended after normal rc replay. The temp dir is removed
+    /// when the remote shell exits, so this does not persist files on servers.
+    static let remoteAgentBootstrapScript: String = {
+        let slugs = remoteAgentMarkerSlugs.map(quote).joined(separator: " ")
+        return #"""
+        _kooky_root="${TMPDIR:-/tmp}/kooky-agent-markers-${USER:-user}-$$"
+        _kooky_bin="$_kooky_root/bin"
+        mkdir -p "$_kooky_bin" 2>/dev/null || {
+            printf 'kooky: could not create remote marker directory\n' >&2
+            "${SHELL:-/bin/sh}" -l
+            exit $?
+        }
+        trap 'rm -rf "$_kooky_root"' EXIT
+        trap 'rm -rf "$_kooky_root"; exit' HUP INT TERM
+
+        _kooky_write_agent_wrapper() {
+            _kooky_slug="$1"
+            cat > "$_kooky_bin/$_kooky_slug" <<'KOOKY_AGENT_WRAPPER'
+        #!/bin/sh
+        _kooky_slug="${0##*/}"
+        _kooky_self_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+        _kooky_real=""
+        _kooky_old_ifs=$IFS
+        IFS=:
+        for _kooky_dir in $PATH; do
+            [ "$_kooky_dir" = "$_kooky_self_dir" ] && continue
+            [ -x "$_kooky_dir/$_kooky_slug" ] || continue
+            _kooky_real="$_kooky_dir/$_kooky_slug"
+            break
+        done
+        IFS=$_kooky_old_ifs
+
+        if [ -z "$_kooky_real" ]; then
+            printf '\033]2;kooky-agent:%s:ended\a' "$_kooky_slug" > /dev/tty 2>/dev/null
+            printf '\n  %s is not installed.\n\n' "$_kooky_slug" >&2
+            exit 127
+        fi
+
+        printf '\033]2;kooky-agent:%s:running\a' "$_kooky_slug" > /dev/tty 2>/dev/null
+        "$_kooky_real" "$@"
+        _kooky_status=$?
+        printf '\033]2;kooky-agent:%s:ended\a' "$_kooky_slug" > /dev/tty 2>/dev/null
+        exit "$_kooky_status"
+        KOOKY_AGENT_WRAPPER
+            chmod +x "$_kooky_bin/$_kooky_slug"
+        }
+
+        for _kooky_slug in \#(slugs); do
+            _kooky_write_agent_wrapper "$_kooky_slug"
+        done
+        unset _kooky_slug
+
+        case "${SHELL:-}" in
+            */zsh)
+                mkdir -p "$_kooky_root/zsh"
+                cat > "$_kooky_root/zsh/.zshrc" <<KOOKY_ZSHRC
+        if [[ -n "\${KOOKY_ORIGINAL_ZDOTDIR:-}" ]]; then
+            export ZDOTDIR="\$KOOKY_ORIGINAL_ZDOTDIR"
+            unset KOOKY_ORIGINAL_ZDOTDIR
+        else
+            unset ZDOTDIR
+        fi
+        # /etc/zshrc (already ran under our ephemeral ZDOTDIR) may have resolved
+        # HISTFILE into the temp dir we rm -rf on exit — reset before user rc so
+        # remote shell history lands in \$HOME and a user override still wins.
+        export HISTFILE="\$HOME/.zsh_history"
+        [[ -r "\${ZDOTDIR:-\$HOME}/.zshenv" ]] && source "\${ZDOTDIR:-\$HOME}/.zshenv"
+        [[ -r "\${ZDOTDIR:-\$HOME}/.zprofile" ]] && source "\${ZDOTDIR:-\$HOME}/.zprofile"
+        [[ -r "\${ZDOTDIR:-\$HOME}/.zshrc" ]] && source "\${ZDOTDIR:-\$HOME}/.zshrc"
+        export KOOKY_AGENT_MARKERS=1
+        export PATH="$_kooky_bin:\$PATH"
+        KOOKY_ZSHRC
+                KOOKY_ORIGINAL_ZDOTDIR="${ZDOTDIR:-}" ZDOTDIR="$_kooky_root/zsh" zsh -l
+                ;;
+            */bash)
+                cat > "$_kooky_root/bashrc" <<KOOKY_BASHRC
+        _kooky_login_rc_loaded=
+        for _kooky_rc in "\$HOME/.bash_profile" "\$HOME/.bash_login" "\$HOME/.profile"; do
+            if [[ -r "\$_kooky_rc" ]]; then
+                source "\$_kooky_rc"
+                _kooky_login_rc_loaded=1
+                break
+            fi
+        done
+        unset _kooky_rc
+        if [[ -z "\$_kooky_login_rc_loaded" && -r "\$HOME/.bashrc" ]]; then
+            source "\$HOME/.bashrc"
+        fi
+        unset _kooky_login_rc_loaded
+        export KOOKY_AGENT_MARKERS=1
+        export PATH="$_kooky_bin:\$PATH"
+        KOOKY_BASHRC
+                bash --rcfile "$_kooky_root/bashrc" -i
+                ;;
+            *)
+                export KOOKY_AGENT_MARKERS=1
+                export PATH="$_kooky_bin:$PATH"
+                "${SHELL:-/bin/sh}" -l
+                ;;
+        esac
+        """#
+    }()
 
     /// Antigravity CLI shares its binary name (`agy`) with Antigravity 2.0
     /// IDE's command-line launcher (`~/.antigravity/antigravity/bin/agy`
@@ -633,6 +878,9 @@ enum KookyShellIntegration {
             printf '\\n  \\033[33mThe `agy` on PATH is the Antigravity IDE launcher, not the CLI.\\033[0m\\n' >&2
             printf '  Install the CLI:\\n' >&2
             printf '    \\033[36mcurl -fsSL https://antigravity.google/cli/install.sh | bash\\033[0m\\n\\n' >&2
+            if [[ -n "$KOOKY_SURFACE_ID" || -n "$KOOKY_AGENT_MARKERS" ]]; then
+                \(agentMarkerCommand(slug: "agy", event: .ended))
+            fi
             if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" ]]; then
                 "$KOOKY_HOOK_BIN" agy ended 2>/dev/null
             fi
@@ -657,17 +905,23 @@ enum KookyShellIntegration {
     }
 
     /// The `running` → exec → `ended` body shared by `bracketWrapperScript`
-    /// and `antigravityWrapperScript`. Outside a kooky session
-    /// (`$KOOKY_SURFACE_ID` unset) the bracket is a no-op — `exec "$real"`
-    /// is the only line that runs so the wrapper is transparent when the
-    /// user invokes the binary from a plain Terminal.app shell.
+    /// and `antigravityWrapperScript`. Outside a kooky session (and without
+    /// `KOOKY_AGENT_MARKERS`) the bracket is a no-op — `exec "$real"` is the
+    /// only line that runs so the wrapper is transparent when the user invokes
+    /// the binary from a plain Terminal.app shell.
     private static func bracketBody(slug: String) -> String {
         """
-        if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" ]]; then
-            "$KOOKY_HOOK_BIN" \(slug) running 2>/dev/null
+        if [[ -n "$KOOKY_SURFACE_ID" || -n "$KOOKY_AGENT_MARKERS" ]]; then
+            \(agentMarkerCommand(slug: slug, event: .running))
+            if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" ]]; then
+                "$KOOKY_HOOK_BIN" \(slug) running 2>/dev/null
+            fi
             "$real" "$@"
             status=$?
-            "$KOOKY_HOOK_BIN" \(slug) ended 2>/dev/null
+            if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" ]]; then
+                "$KOOKY_HOOK_BIN" \(slug) ended 2>/dev/null
+            fi
+            \(agentMarkerCommand(slug: slug, event: .ended))
             exit $status
         fi
         exec "$real" "$@"

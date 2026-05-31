@@ -27,9 +27,11 @@ enum KookySettings {
     // Uncomment a line to override the default.
     {
       // === kooky-specific ===
-      // "agent": {
-      //   "default": "claude",
-      //   "autoLaunch": true
+      // "agents": {
+      //   "default": "claude"
+      // },
+      // "ssh": {
+      //   "remoteAgentDetection": true
       // },
       // "sidebar": {
       //   "mode": "full"

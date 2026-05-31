@@ -80,7 +80,22 @@ final class ShellIntegrationTests: XCTestCase {
         XCTAssertTrue(script.contains("self_dir"), "must skip own dir on PATH walk")
         XCTAssertTrue(script.contains("\"$KOOKY_HOOK_BIN\" amp running"))
         XCTAssertTrue(script.contains("\"$KOOKY_HOOK_BIN\" amp ended"))
+        XCTAssertTrue(script.contains("kooky-agent:amp:running"))
+        XCTAssertTrue(script.contains("kooky-agent:amp:ended"))
+        XCTAssertTrue(script.contains("KOOKY_AGENT_MARKERS"))
+        XCTAssertTrue(script.contains("> /dev/tty"), "OSC marker must target the tty, not stdout (no pollution of a redirected agent)")
+        XCTAssertTrue(script.contains("[[ -n \"$KOOKY_AGENT_MARKERS\" ]] && printf"), "marker gated on KOOKY_AGENT_MARKERS so local sessions stay socket-only")
         XCTAssertTrue(script.contains("exec \"$real\" \"$@\""), "must passthrough when KOOKY_SURFACE_ID is unset")
+    }
+
+    @MainActor
+    func testAgentStatusMarkerParsesKnownAgentTitle() throws {
+        let parsed = try XCTUnwrap(AgentStatusMarker.parseTitle("kooky-agent:codex:attention"))
+
+        XCTAssertEqual(parsed.agent.id, AgentTemplate.codex.id)
+        XCTAssertEqual(parsed.event, .attention)
+        XCTAssertNil(AgentStatusMarker.parseTitle("kooky-agent:not-real:running"))
+        XCTAssertNil(AgentStatusMarker.parseTitle("corey@web-prod: ~/srv"))
     }
 
     func testKimiWrapperBracketsRunningAndEnded() {
@@ -93,6 +108,46 @@ final class ShellIntegrationTests: XCTestCase {
         XCTAssertTrue(script.contains("\"$KOOKY_HOOK_BIN\" kimi running"))
         XCTAssertTrue(script.contains("\"$KOOKY_HOOK_BIN\" kimi ended"))
         XCTAssertTrue(script.contains("exec \"$real\" \"$@\""), "must passthrough when KOOKY_SURFACE_ID is unset")
+    }
+
+    func testSshWrapperInjectsRemoteBootstrapForPlainInteractiveLogin() {
+        let script = KookyShellIntegration.sshWrapperScript
+
+        XCTAssertTrue(script.contains("KOOKY_DISABLE_SSH_AGENT_MARKERS"))
+        XCTAssertTrue(script.contains("! -t 0 || ! -t 1"), "must skip non-interactive ssh transport")
+        XCTAssertTrue(script.contains("remote_command="), "must append exactly one remote shell command")
+        XCTAssertTrue(script.contains("sh -lc"), "remote command should run through POSIX sh")
+        XCTAssertTrue(script.contains("exec \"$real\" -t \"$@\" \"$remote_command\""))
+    }
+
+    func testSshWrapperPassesThroughRemoteCommandsAndTransportModes() {
+        let script = KookyShellIntegration.sshWrapperScript
+
+        // A no-remote-shell flag anywhere in a short-option group (e.g. `-fN`
+        // in `ssh -fN -L …`) passes through untouched — regression guard for
+        // clobbering combined-flag port forwards.
+        XCTAssertTrue(script.contains("[NTVGQOW]) exec \"$real\" \"$@\""))
+        // An explicit `-o RemoteCommand=…` is the user's own remote command;
+        // don't override it with our bootstrap.
+        XCTAssertTrue(script.contains("[Rr]emote[Cc]ommand*) exec \"$real\" \"$@\""))
+        XCTAssertTrue(script.contains("remote_command_seen=1"))
+        XCTAssertTrue(script.contains("if (( ! destination_seen || remote_command_seen )); then"))
+        XCTAssertTrue(script.contains("exec \"$real\" \"$@\""))
+    }
+
+    func testRemoteAgentBootstrapWritesMarkerWrappers() {
+        let script = KookyShellIntegration.remoteAgentBootstrapScript
+
+        XCTAssertTrue(script.contains(#"_kooky_root="${TMPDIR:-/tmp}/kooky-agent-markers-"#))
+        XCTAssertTrue(script.contains("for _kooky_slug in 'claude' 'codex'"))
+        XCTAssertTrue(script.contains("'cursor-agent'"))
+        XCTAssertTrue(script.contains("'kimi'"))
+        XCTAssertTrue(script.contains(#"printf '\033]2;kooky-agent:%s:running\a'"#))
+        XCTAssertTrue(script.contains(#"printf '\033]2;kooky-agent:%s:ended\a'"#))
+        XCTAssertTrue(script.contains("export KOOKY_AGENT_MARKERS=1"))
+        XCTAssertTrue(script.contains(#"export PATH="$_kooky_bin:$PATH""#))
+        XCTAssertTrue(script.contains("> /dev/tty"), "remote markers must target the tty, not the agent's redirected stdout")
+        XCTAssertTrue(script.contains("export HISTFILE="), "remote zsh must reset HISTFILE off the ephemeral ZDOTDIR (else remote history is rm -rf'd on logout)")
     }
 
     func testAntigravityWrapperGuardsAgainstIDEShim() {

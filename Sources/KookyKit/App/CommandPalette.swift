@@ -102,8 +102,8 @@ enum PaletteIndex {
                             title: tab.title,
                             subtitle: "tab in \(ws.title)\(winLabel)",
                             kind: .tab(sessionId: tab.id, workspaceId: ws.id, windowId: controller.windowId),
-                            symbol: tab.agent.symbol,
-                            iconAsset: tab.agent.iconAsset
+                            symbol: tab.displayAgent.symbol,
+                            iconAsset: tab.displayAgent.iconAsset
                         ))
                     }
                 }

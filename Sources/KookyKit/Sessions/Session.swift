@@ -48,6 +48,12 @@ final class Session: Identifiable {
     /// `claude` inside a Terminal tab → upgraded to `.claudeCode` so the
     /// sidebar / tab icon and agent state-tracking start working.
     var agent: AgentTemplate
+    /// Runtime-only agent reported through the terminal byte stream rather
+    /// than the local hook socket. This is primarily for ssh remotes: the
+    /// remote side can emit an OSC title marker that kooky sees locally,
+    /// while the persisted launch template remains `terminal`.
+    var transientAgent: AgentTemplate?
+    var displayAgent: AgentTemplate { transientAgent ?? agent }
     /// Per-tab cwd. Initialized from the workspace's cwd at spawn, then kept in
     /// sync via OSC 7 (`engine.onPwdChange`). Drives the tab title so users see
     /// where they are, not which agent template the tab was launched from.
@@ -263,7 +269,7 @@ final class Session: Identifiable {
         if let reported = terminalTitle, !reported.isEmpty { return reported }
         if currentDirectory.standardizedFileURL.path == NSHomeDirectory() { return "~" }
         let last = currentDirectory.lastPathComponent
-        return last.isEmpty ? agent.title : last
+        return last.isEmpty ? displayAgent.title : last
     }
 
     init(

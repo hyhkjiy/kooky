@@ -1282,8 +1282,21 @@ final class WorkspaceStore {
             self?.gitWatchers[session.id]?.watch(cwd: session.currentDirectory)
             self?.scheduleSave()
         }
-        engine.onTitleChange = { [weak session] title in
+        engine.onTitleChange = { [weak self, weak session] title in
             guard let session else { return }
+            // Any `kooky-agent:*` title is a status marker, never a visible
+            // title — consume it (applying the agent state when it resolves to
+            // a known agent) and stop before it reaches `terminalTitle`.
+            if AgentStatusMarker.isMarkerTitle(title) {
+                if let marker = AgentStatusMarker.parseTitle(title) {
+                    self?.applyAgentStatusMarker(
+                        agent: marker.agent,
+                        event: marker.event,
+                        session: session
+                    )
+                }
+                return
+            }
             // A path-shaped SET_TITLE is noise: libghostty synthesises one
             // from OSC 7, and the wrapper re-emits the cwd each prompt — both
             // are things `Session.title` already renders. Keep only what the
@@ -1299,6 +1312,17 @@ final class WorkspaceStore {
         }
         engine.onCommandFinished = { [weak self, weak session] exit, duration in
             guard let session else { return }
+            // A remote agent surfaced via an OSC marker (transientAgent) emits
+            // no `ended` marker when the ssh drops abnormally (network loss,
+            // killed connection). The local command finishing — the `ssh`
+            // itself returning to the prompt — is the reliable "remote session
+            // over" signal, so clear the transient promotion here too. During a
+            // live ssh the local shell is blocked, so this never fires mid-
+            // session and can't clear a still-running remote agent early.
+            if session.transientAgent != nil {
+                session.transientAgent = nil
+                session.activityState = .idle
+            }
             session.lastCommandExit = exit
             session.lastCommandDuration = duration
             // A finished command may have changed the working tree (commit /
@@ -1333,6 +1357,25 @@ final class WorkspaceStore {
             guard let session, session.searchSelected != selected else { return }
             session.searchSelected = selected
         }
+    }
+
+    private func applyAgentStatusMarker(agent: AgentTemplate, event: HookEvent, session: Session) {
+        let agentBefore = session.agent.id
+        if event == .ended {
+            if session.transientAgent?.id == agent.id || session.transientAgent?.baseAgentId == agent.id {
+                session.transientAgent = nil
+            }
+            if session.agent.id == agent.id || session.agent.baseAgentId == agent.id {
+                session.agent = .terminal
+            }
+        } else if session.agent.isShell {
+            session.transientAgent = agent
+        }
+
+        if session.activityState != event.activityState {
+            session.activityState = event.activityState
+        }
+        if session.agent.id != agentBefore { scheduleSave() }
     }
 
     private func refreshGitStatus(for session: Session) {

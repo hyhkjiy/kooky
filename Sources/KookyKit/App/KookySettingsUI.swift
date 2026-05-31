@@ -75,6 +75,11 @@ final class KookySettingsModel {
     /// persisted conversation id stays on disk so turning the toggle back
     /// on resumes from where the user left off.
     var resumeConversations: Bool = true
+    /// Opt-in SSH integration for remote agent status. Disabled by default:
+    /// when enabled, kooky installs an `ssh` wrapper that injects temporary
+    /// marker-emitting agent wrappers into plain interactive `ssh host`
+    /// sessions. The marker receiver itself is always available.
+    var sshRemoteAgentDetection: Bool = false
 
     private var saveWork: DispatchWorkItem?
 
@@ -105,6 +110,9 @@ final class KookySettingsModel {
         agentOptions = (agents["options"] as? [String: String]) ?? [:]
         defaultAgentId = agents["default"] as? String
         resumeConversations = (agents["resumeConversations"] as? Bool) ?? true
+
+        let ssh = parsed["ssh"] as? [String: Any] ?? [:]
+        sshRemoteAgentDetection = (ssh["remoteAgentDetection"] as? Bool) ?? false
 
         let rawCustom = (agents["custom"] as? [[String: Any]]) ?? []
         let builtinIds = Set(AgentTemplate.builtin.map(\.id))
@@ -254,6 +262,14 @@ final class KookySettingsModel {
             parsed["agents"] = agents
         }
 
+        var ssh = parsed["ssh"] as? [String: Any] ?? [:]
+        ssh["remoteAgentDetection"] = sshRemoteAgentDetection ? true : nil
+        if ssh.isEmpty {
+            parsed.removeValue(forKey: "ssh")
+        } else {
+            parsed["ssh"] = ssh
+        }
+
         let serialisedPresets: [[String: Any]] = terminalPresets.compactMap { p in
             guard !p.id.isEmpty else { return nil }
             var dict: [String: Any] = ["id": p.id]
@@ -282,6 +298,7 @@ final class KookySettingsModel {
 
         KookySettings.write(parsed)
         KookyShellIntegration.refreshClaudeCustomSettings(customAgents: customAgents)
+        KookyShellIntegration.refreshSshRemoteAgentDetection(enabled: sshRemoteAgentDetection)
         // Theme-only diff is the trigger for chrome / window-appearance
         // refresh — font and cursor changes also flow through `reloadConfig`
         // so libghostty picks up the new values, but they don't change
@@ -411,7 +428,7 @@ final class KookySettingsModel {
 }
 
 enum SettingsCategory: String, CaseIterable, Identifiable {
-    case general, terminalPresets, codingAgents, statusBar, advanced
+    case general, terminalPresets, codingAgents, ssh, statusBar, advanced
 
     var id: String { rawValue }
 
@@ -420,6 +437,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         case .general: return "General"
         case .terminalPresets: return "Terminals"
         case .codingAgents: return "Agents"
+        case .ssh: return "SSH"
         case .statusBar: return "Status Bar"
         case .advanced: return "Advanced"
         }
@@ -459,6 +477,7 @@ struct KookySettingsView: View {
         .onChange(of: model.defaultAgentId) { _, _ in model.scheduleSave() }
         .onChange(of: model.customAgents) { _, _ in model.scheduleSave() }
         .onChange(of: model.resumeConversations) { _, _ in model.scheduleSave() }
+        .onChange(of: model.sshRemoteAgentDetection) { _, _ in model.scheduleSave() }
         .onChange(of: model.terminalPresets) { _, _ in model.scheduleSave() }
         .onChange(of: model.hiddenPresets) { _, _ in model.scheduleSave() }
         .onChange(of: model.statusBarItems) { _, _ in model.scheduleSave() }
@@ -519,6 +538,7 @@ struct KookySettingsView: View {
             case .general: generalDetail
             case .terminalPresets: terminalPresetsDetail
             case .codingAgents: codingAgentsDetail
+            case .ssh: sshDetail
             case .statusBar: statusBarDetail
             case .advanced: advancedDetail
             }
@@ -598,6 +618,16 @@ struct KookySettingsView: View {
             SettingsHairline()
             SettingsRow(label: "resume-conversation-when-reopen") {
                 Toggle("", isOn: $model.resumeConversations)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+        }
+    }
+
+    private var sshDetail: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsRow(label: "remote-agent-detection") {
+                Toggle("", isOn: $model.sshRemoteAgentDetection)
                     .labelsHidden()
                     .toggleStyle(.switch)
             }

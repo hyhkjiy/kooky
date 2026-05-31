@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.21.0 — 2026-06-01
+
+- Remote agent detection over SSH (opt-in) — `ssh` into a machine from kooky and run an agent there (Claude, Codex, …), and the sidebar now shows that agent's icon and activity instead of treating the tab as a plain terminal. Turn it on in Settings → SSH. (Resolves #19.)
+
 ## v0.20.1 — 2026-05-30
 
 - Agent icons now show on light themes — the monochrome marks (OpenCode, Cursor, Copilot, Grok, Kimi) were invisible on light color schemes and now adapt to the theme so they're visible everywhere.

@@ -67,8 +67,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         // surface is spawned, since `LibghosttyApp` reads `~/.kooky/settings.json`
         // at process init when the first surface is created.
         KookyOnboarding.runIfNeeded()
-        KookyShellIntegration.installAgentHooks()
-        KookyShellIntegration.refreshClaudeCustomSettings(customAgents: KookySettingsModel.shared.customAgents)
+        let settings = KookySettingsModel.shared
+        KookyShellIntegration.installAgentHooks(sshRemoteAgentDetection: settings.sshRemoteAgentDetection)
+        KookyShellIntegration.refreshClaudeCustomSettings(customAgents: settings.customAgents)
 
         restoreWindows()
 

@@ -21,7 +21,7 @@ struct TabBarItem: View {
     var body: some View {
         HStack(spacing: 7) {
             commandStatusDot
-            AgentIconView(asset: tab.agent.iconAsset, fallbackSymbol: tab.agent.symbol, size: 15)
+            AgentIconView(asset: tab.displayAgent.iconAsset, fallbackSymbol: tab.displayAgent.symbol, size: 15)
             Text(tab.title)
                 .font(Theme.display(12, weight: .regular))
                 .lineLimit(1)
