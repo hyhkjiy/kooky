@@ -112,6 +112,10 @@ swift test                           # 383 个单测
 
 `Vendor/` 和 `dist/` 都在 `.gitignore` 里。libghostty 的 setup 脚本可以反复跑；SHA 没变时会直接跳过。
 
+## Star 趋势
+
+[![Star History Chart](https://api.star-history.com/svg?repos=iAmCorey/kooky&type=Date)](https://star-history.com/#iAmCorey/kooky&Date)
+
 ## 许可证
 
 MIT —— 见 [LICENSE](LICENSE)。打包进来的第三方资源保留各自的许可证，详见 [NOTICE.md](NOTICE.md)。

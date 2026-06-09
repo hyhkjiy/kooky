@@ -112,6 +112,10 @@ swift test                           # 383 unit tests
 
 `Vendor/` and `dist/` are gitignored. The libghostty setup script is idempotent.
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=iAmCorey/kooky&type=Date)](https://star-history.com/#iAmCorey/kooky&Date)
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Bundled third-party assets retain their upstream licenses; see [NOTICE.md](NOTICE.md).

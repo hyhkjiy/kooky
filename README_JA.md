@@ -112,6 +112,10 @@ swift test                           # 383 個のユニットテスト
 
 `Vendor/` と `dist/` は `.gitignore` 済みです。libghostty の setup スクリプトは冪等で、SHA に変更がなければスキップされます。
 
+## スター履歴
+
+[![Star History Chart](https://api.star-history.com/svg?repos=iAmCorey/kooky&type=Date)](https://star-history.com/#iAmCorey/kooky&Date)
+
 ## ライセンス
 
 MIT —— [LICENSE](LICENSE) を参照。同梱されているサードパーティ製アセットはそれぞれのライセンスに従います。詳細は [NOTICE.md](NOTICE.md) を参照。
