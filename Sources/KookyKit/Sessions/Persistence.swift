@@ -39,6 +39,8 @@ struct PersistedWorkspace: Codable, Equatable {
     /// `workingDirectoryPath` so the latter can drift with OSC 7 cwd
     /// reports without breaking close/reconcile path lookups.
     var worktreePath: String?
+    /// nil = local workspace; non-nil = Remote SSH workspace.
+    var remote: RemoteWorkspace?
 
     @MainActor
     init(_ ws: Workspace) {
@@ -50,9 +52,10 @@ struct PersistedWorkspace: Codable, Equatable {
         self.worktreeParentId = ws.worktreeParentId
         self.worktreeBranch = ws.worktreeBranch
         self.worktreePath = ws.worktreePath?.path
+        self.remote = ws.remote
     }
 
-    init(id: UUID, workingDirectoryPath: String, root: PersistedPaneNode, activePaneId: UUID? = nil, customTitle: String? = nil, worktreeParentId: UUID? = nil, worktreeBranch: String? = nil, worktreePath: String? = nil) {
+    init(id: UUID, workingDirectoryPath: String, root: PersistedPaneNode, activePaneId: UUID? = nil, customTitle: String? = nil, worktreeParentId: UUID? = nil, worktreeBranch: String? = nil, worktreePath: String? = nil, remote: RemoteWorkspace? = nil) {
         self.id = id
         self.workingDirectoryPath = workingDirectoryPath
         self.root = root
@@ -61,11 +64,12 @@ struct PersistedWorkspace: Codable, Equatable {
         self.worktreeParentId = worktreeParentId
         self.worktreeBranch = worktreeBranch
         self.worktreePath = worktreePath
+        self.remote = remote
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, workingDirectoryPath, root, activePaneId, customTitle
-        case worktreeParentId, worktreeBranch, worktreePath
+        case worktreeParentId, worktreeBranch, worktreePath, remote
         // Legacy keys
         case tabs, activeTabId
     }
@@ -80,6 +84,7 @@ struct PersistedWorkspace: Codable, Equatable {
         try c.encodeIfPresent(worktreeParentId, forKey: .worktreeParentId)
         try c.encodeIfPresent(worktreeBranch, forKey: .worktreeBranch)
         try c.encodeIfPresent(worktreePath, forKey: .worktreePath)
+        try c.encodeIfPresent(remote, forKey: .remote)
     }
 
     init(from decoder: Decoder) throws {
@@ -90,6 +95,7 @@ struct PersistedWorkspace: Codable, Equatable {
         worktreeParentId = try c.decodeIfPresent(UUID.self, forKey: .worktreeParentId)
         worktreeBranch = try c.decodeIfPresent(String.self, forKey: .worktreeBranch)
         worktreePath = try c.decodeIfPresent(String.self, forKey: .worktreePath)
+        remote = try c.decodeIfPresent(RemoteWorkspace.self, forKey: .remote)
         if let root = try c.decodeIfPresent(PersistedPaneNode.self, forKey: .root) {
             self.root = root
             self.activePaneId = try c.decodeIfPresent(UUID.self, forKey: .activePaneId)

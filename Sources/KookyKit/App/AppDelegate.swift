@@ -136,6 +136,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     private func addWindow(windowId: UUID = UUID()) -> KookyWindowController {
         let store = WorkspaceStore(
             persistence: WindowPersistence(windowId: windowId, app: appPersistence),
+            initialWorkspaceTemplateProvider: {
+                AgentTemplate.defaultLaunchTemplate(model: KookySettingsModel.shared) ?? .terminal
+            },
             peerStores: { [weak self] in self?.windowControllers.map(\.store) ?? [] },
             moveToNewWindow: { [weak self] id in self?.moveTabToNewWindow(sessionId: id) },
             onSessionAlert: { [weak self] id, kind in self?.handleSessionAlert(id, kind) }

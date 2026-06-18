@@ -174,6 +174,7 @@ final class WorkspaceStore {
         engineFactory: @escaping @MainActor () -> any TerminalEngine = { LibghosttyEngine() },
         optionsProvider: @escaping @MainActor (String) -> String? = { KookySettingsModel.shared.agentOptions[$0] },
         resumeProvider: @escaping @MainActor () -> Bool = { KookySettingsModel.shared.resumeConversations },
+        initialWorkspaceTemplateProvider: @escaping @MainActor () -> AgentTemplate = { .terminal },
         peerStores: @escaping @MainActor () -> [WorkspaceStore] = { [] },
         moveToNewWindow: @escaping @MainActor (UUID) -> Void = { _ in },
         onSessionAlert: @escaping @MainActor (UUID, SessionAlertKind) -> Void = { _, _ in }
@@ -188,7 +189,7 @@ final class WorkspaceStore {
         if let saved = persistence.load(), !saved.workspaces.isEmpty {
             restore(from: saved)
         } else {
-            addWorkspace()
+            addWorkspace(template: initialWorkspaceTemplateProvider())
         }
     }
 
@@ -197,6 +198,7 @@ final class WorkspaceStore {
     @discardableResult
     func addWorkspace(
         workingDirectory: URL? = nil,
+        remote: RemoteWorkspace? = nil,
         worktreeParent: Workspace? = nil,
         worktreeBranch: String? = nil,
         template: AgentTemplate = .terminal
@@ -207,6 +209,7 @@ final class WorkspaceStore {
         let pane = Pane()
         let root = PaneNode(pane: pane)
         let workspace = Workspace(workingDirectory: dir, root: root)
+        workspace.remote = remote
         workspace.worktreeParentId = worktreeParent?.id
         workspace.worktreeBranch = worktreeBranch
         // Pin worktreePath at create time so `git worktree remove` always
@@ -217,7 +220,7 @@ final class WorkspaceStore {
         if worktreeParent != nil {
             workspace.worktreePath = dir.standardizedFileURL
         }
-        let session = spawnSession(template: template, initialCwd: dir)
+        let session = spawnSession(template: template, initialCwd: dir, remote: remote)
         wireSessionCallbacks(engine: session.engine, session: session, workspace: workspace)
         pane.tabs.append(session)
         pane.activeTabId = session.id
@@ -377,6 +380,7 @@ final class WorkspaceStore {
         // is @MainActor so the closure can't touch its properties from
         // background tasks.
         let inputs: [(index: Int, sourceId: UUID, cwd: URL)] = workspaces.enumerated().compactMap { index, source in
+            guard source.remote == nil else { return nil }
             guard source.worktreeParentId == nil else { return nil }
             return (index, source.id, source.workingDirectory)
         }
@@ -539,7 +543,7 @@ final class WorkspaceStore {
 
     @discardableResult
     func duplicateWorkspace(_ workspace: Workspace) -> Workspace {
-        addWorkspace(workingDirectory: workspace.workingDirectory)
+        addWorkspace(workingDirectory: workspace.workingDirectory, remote: workspace.remote)
     }
 
     /// Set or clear a user-provided workspace title. Empty / whitespace input
@@ -659,7 +663,13 @@ final class WorkspaceStore {
         let cwd = initialCwd
             ?? template.extraCwd.map { resolvedSpawnCwd(($0 as NSString).expandingTildeInPath) }
             ?? workspace.workingDirectory
-        let session = spawnSession(template: template, initialCwd: cwd, conversationId: conversationId, initialPrompt: initialPrompt)
+        let session = spawnSession(
+            template: template,
+            initialCwd: cwd,
+            remote: workspace.remote,
+            conversationId: conversationId,
+            initialPrompt: initialPrompt
+        )
         wireSessionCallbacks(engine: session.engine, session: session, workspace: workspace)
         target.tabs.append(session)
         target.activeTabId = session.id
@@ -990,7 +1000,7 @@ final class WorkspaceStore {
         guard case .pane(let existing) = leafNode.content else { return nil }
         let template = existing.activeTab?.agent ?? .terminal
         let cwd = existing.activeTab?.currentDirectory ?? workspace.workingDirectory
-        let newSession = spawnSession(template: template, initialCwd: cwd)
+        let newSession = spawnSession(template: template, initialCwd: cwd, remote: workspace.remote)
         wireSessionCallbacks(engine: newSession.engine, session: newSession, workspace: workspace)
         let newPane = Pane(tabs: [newSession], activeTabId: newSession.id)
         let firstChild = PaneNode(pane: existing)
@@ -1212,12 +1222,13 @@ final class WorkspaceStore {
     private func restore(from state: PersistedState) {
         let fm = FileManager.default
         for ws in state.workspaces {
-            guard let root = restorePane(ws.root, fm: fm) else { continue }
+            guard let root = restorePane(ws.root, fm: fm, remote: ws.remote) else { continue }
             let workspace = Workspace(
                 id: ws.id,
                 workingDirectory: URL(fileURLWithPath: ws.workingDirectoryPath),
                 root: root
             )
+            workspace.remote = ws.remote
             workspace.customTitle = ws.customTitle
             workspace.worktreeParentId = ws.worktreeParentId
             workspace.worktreeBranch = ws.worktreeBranch
@@ -1243,7 +1254,7 @@ final class WorkspaceStore {
         rightSidebarMode = state.rightSidebarMode ?? .hidden
     }
 
-    private func restorePane(_ persisted: PersistedPaneNode, fm: FileManager) -> PaneNode? {
+    private func restorePane(_ persisted: PersistedPaneNode, fm: FileManager, remote: RemoteWorkspace?) -> PaneNode? {
         switch persisted.kind {
         case .pane(let p):
             let pane = Pane(id: p.id)
@@ -1252,6 +1263,7 @@ final class WorkspaceStore {
                 let session = spawnSession(
                     template: agent,
                     initialCwd: resolvedSpawnCwd(tab.currentDirectoryPath),
+                    remote: remote,
                     sessionId: tab.id,
                     conversationId: tab.conversationId
                 )
@@ -1263,8 +1275,8 @@ final class WorkspaceStore {
                 : pane.tabs.first?.id
             return PaneNode(pane: pane)
         case .split(let orientation, let first, let second, let fraction):
-            guard let firstChild = restorePane(first, fm: fm),
-                  let secondChild = restorePane(second, fm: fm) else { return nil }
+            guard let firstChild = restorePane(first, fm: fm, remote: remote),
+                  let secondChild = restorePane(second, fm: fm, remote: remote) else { return nil }
             return PaneNode(
                 id: persisted.id,
                 content: .split(
@@ -1280,7 +1292,7 @@ final class WorkspaceStore {
     /// Spawns the engine + Session. Caller wires `onPwdChange` / `onFocus`
     /// after a workspace ref is available — `restore` builds sessions before
     /// the workspace exists, so callbacks can't capture it here.
-    private func spawnSession(template: AgentTemplate, initialCwd: URL, sessionId: UUID = UUID(), conversationId: String? = nil, initialPrompt: String? = nil) -> Session {
+    private func spawnSession(template: AgentTemplate, initialCwd: URL, remote: RemoteWorkspace? = nil, sessionId: UUID = UUID(), conversationId: String? = nil, initialPrompt: String? = nil) -> Session {
         let engine = engineFactory()
         // Resume gated by user setting — `resumeConversations` flips this off
         // when the user wants every Claude tab to start fresh without
@@ -1294,6 +1306,9 @@ final class WorkspaceStore {
             resumeId: resumeId,
             initialPrompt: initialPrompt
         )
+        if let remote {
+            config = remoteSessionConfig(from: config, template: template, remote: remote)
+        }
         config.workingDirectory = initialCwd.path
         // A Claude-Code-based custom agent with an env block hands `claude`
         // its endpoint / key via a per-agent Claude settings file (written by
@@ -1314,15 +1329,106 @@ final class WorkspaceStore {
         )
     }
 
+    private func remoteSessionConfig(
+        from config: TerminalSessionConfig,
+        template: AgentTemplate,
+        remote: RemoteWorkspace
+    ) -> TerminalSessionConfig {
+        var next = config
+        let agentCommand = config.environment["KOOKY_AGENT"]
+        let sshCommand = remoteSSHCommand(
+            remote: remote,
+            agentCommand: agentCommand,
+            markerSlug: template.initialCommand
+        )
+        next.environment["KOOKY_AGENT"] = sshCommand
+        return next
+    }
+
+    private func remoteSSHCommand(
+        remote: RemoteWorkspace,
+        agentCommand: String?,
+        markerSlug: String?
+    ) -> String {
+        let destination = remote.normalizedDestination
+        let script = remoteShellScript(
+            path: remote.path,
+            agentCommand: agentCommand,
+            markerSlug: markerSlug
+        )
+        let marker = RemoteLoginMarker.titlePrefix + destination
+        return """
+        printf '\\033]2;\(KookyShellIntegration.quote(marker))\\a' > /dev/tty 2>/dev/null; ssh -t \(KookyShellIntegration.quote(destination)) sh -lc \(KookyShellIntegration.quote(script))
+        """
+    }
+
+    private func remoteShellScript(
+        path: String,
+        agentCommand: String?,
+        markerSlug: String?
+    ) -> String {
+        let cdCommand = remoteCdCommand(path)
+        guard let agentCommand, !agentCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return """
+            \(cdCommand)
+            exec "${SHELL:-/bin/sh}" -l
+            """
+        }
+
+        let startMarker = markerSlug.map {
+            "printf '\\033]2;\(AgentStatusMarker.title(slug: $0, event: .running))\\a' > /dev/tty 2>/dev/null"
+        } ?? ":"
+        let endMarker = markerSlug.map {
+            "printf '\\033]2;\(AgentStatusMarker.title(slug: $0, event: .ended))\\a' > /dev/tty 2>/dev/null"
+        } ?? ":"
+
+        let inner = """
+        export KOOKY_AGENT_MARKERS=1
+        \(startMarker)
+        \(agentCommand)
+        _kooky_status=$?
+        \(endMarker)
+        printf '\\n'
+        exec "${SHELL:-/bin/sh}" -l
+        """
+
+        return """
+        \(cdCommand)
+        case "${SHELL:-}" in
+            */zsh|*/bash) exec "$SHELL" -lic \(KookyShellIntegration.quote(inner)) ;;
+            *) \(inner) ;;
+        esac
+        """
+    }
+
+    private func remoteCdCommand(_ rawPath: String) -> String {
+        let path = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if path.isEmpty || path == "~" {
+            return "cd || exit $?"
+        }
+        if path.hasPrefix("~/") {
+            let rest = String(path.dropFirst(2))
+            return "cd \"$HOME\"/\(KookyShellIntegration.quote(rest)) || exit $?"
+        }
+        return "cd \(KookyShellIntegration.quote(path)) || exit $?"
+    }
+
     private func wireSessionCallbacks(engine: any TerminalEngine, session: Session, workspace: Workspace) {
         // Initial refresh — without these, the status bar stays empty until
         // the user `cd`s or runs a command. Both fetchers silently hide
         // results for non-applicable cwds, so the calls are harmless.
-        refreshGitStatus(for: session)
-        refreshEnvironment(for: session)
-        installGitWatcher(for: session)
+        if workspace.remote == nil {
+            refreshGitStatus(for: session)
+            refreshEnvironment(for: session)
+            installGitWatcher(for: session)
+        }
         engine.onPwdChange = { [weak self, weak session, weak workspace] pwd in
             guard let session else { return }
+            if let workspace, workspace.remote != nil {
+                workspace.remote?.path = pwd
+                self?.scheduleSave()
+                return
+            }
             let url = URL(fileURLWithPath: pwd)
             if session.currentDirectory.path != pwd {
                 session.currentDirectory = url
@@ -1370,7 +1476,7 @@ final class WorkspaceStore {
             guard let self, let session, let workspace else { return }
             self.activateTab(session, in: workspace)
         }
-        engine.onCommandFinished = { [weak self, weak session] exit, duration in
+        engine.onCommandFinished = { [weak self, weak session, weak workspace] exit, duration in
             guard let session else { return }
             // A remote agent surfaced via an OSC marker (transientAgent) emits
             // no `ended` marker when the ssh drops abnormally (network loss,
@@ -1392,8 +1498,10 @@ final class WorkspaceStore {
             // A finished command may have changed the working tree (commit /
             // git add / file edits) or installed a venv / dropped an .nvmrc.
             // Refresh so the bar doesn't lie.
-            self?.refreshGitStatus(for: session)
-            self?.refreshEnvironment(for: session)
+            if workspace?.remote == nil {
+                self?.refreshGitStatus(for: session)
+                self?.refreshEnvironment(for: session)
+            }
         }
         engine.onUserInput = { [weak session] in
             // libghostty exposes no command-START, so a keystroke (the first

@@ -4,6 +4,7 @@ import SwiftUI
 /// `.sheet(item:)` modifier. `.sheet(isPresented:)` per state would race
 /// when switching directly between modes (create → confirm-remove).
 private enum SidebarSheet: Identifiable {
+    case remoteSSHWorkspace
     case createWorktree(Workspace)
     case confirmRemoveWorktree(Workspace)
     case confirmCloseOthers(WorkspaceStore.BulkRemovalRequest)
@@ -11,6 +12,7 @@ private enum SidebarSheet: Identifiable {
 
     var id: String {
         switch self {
+        case .remoteSSHWorkspace: return "remote-ssh-workspace"
         case .createWorktree(let ws): return "create-\(ws.id.uuidString)"
         case .confirmRemoveWorktree(let ws): return "remove-\(ws.id.uuidString)"
         case .confirmCloseOthers(let req): return "close-others-\(req.keeping.id.uuidString)"
@@ -81,6 +83,16 @@ struct SidebarView: View {
         } isTargeted: { isFolderDropTargeted = $0 }
         .sheet(item: $sheet) { current in
             switch current {
+            case .remoteSSHWorkspace:
+                RemoteSSHWorkspaceSheet(
+                    create: { remote in
+                        store.addWorkspace(
+                            workingDirectory: URL(fileURLWithPath: NSHomeDirectory()),
+                            remote: remote
+                        )
+                    },
+                    dismiss: { sheet = nil }
+                )
             case .createWorktree(let source):
                 CreateWorktreeSheet(
                     source: source,
@@ -221,6 +233,7 @@ struct SidebarView: View {
     /// opened as a workspace) hide the menu item so users never see an
     /// option that can only error.
     private func canCreateWorktree(from workspace: Workspace) -> Bool {
+        guard workspace.remote == nil else { return false }
         guard workspace.worktreeParentId == nil else { return false }
         return GitWatcher.findGitDir(near: workspace.workingDirectory) != nil
     }
@@ -228,14 +241,7 @@ struct SidebarView: View {
     @ViewBuilder
     private func brand(isCompact: Bool) -> some View {
         if isCompact {
-            HoverableIconButton(
-                systemName: "plus",
-                fontSize: 12,
-                size: 28,
-                help: "New workspace"
-            ) {
-                store.addWorkspace()
-            }
+            newWorkspaceMenu(size: 28)
             .padding(.top, Theme.space3)
             .padding(.bottom, Theme.space2)
         } else {
@@ -244,19 +250,31 @@ struct SidebarView: View {
                     .font(Theme.display(15, weight: .medium))
                     .foregroundStyle(Theme.chromeForeground)
                 Spacer()
-                HoverableIconButton(
-                    systemName: "plus",
-                    fontSize: 12,
-                    size: 28,
-                    help: "New workspace"
-                ) {
-                    store.addWorkspace()
-                }
+                newWorkspaceMenu(size: 28)
             }
             .padding(.horizontal, Theme.space4)
             .padding(.top, Theme.space3)
             .padding(.bottom, Theme.space2)
         }
+    }
+
+    private func newWorkspaceMenu(size: CGFloat) -> some View {
+        Menu {
+            Button("Local Workspace") {
+                store.addWorkspace()
+            }
+            Button("Remote SSH Workspace...") {
+                sheet = .remoteSSHWorkspace
+            }
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 12, weight: .medium))
+                .frame(width: size, height: size)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .buttonStyle(.plain)
+        .help("New workspace")
     }
 
     private func list(isCompact: Bool, proxy: ScrollViewProxy) -> some View {

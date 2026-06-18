@@ -125,6 +125,24 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(decoded.worktreePath, dir)
     }
 
+    func testPersistedWorkspaceRoundtripsRemoteWorkspace() throws {
+        let dir = NSHomeDirectory()
+        let tab = PersistedTab(id: UUID(), agentId: "terminal", currentDirectoryPath: dir)
+        let pane = PersistedPane(id: UUID(), tabs: [tab], activeTabId: tab.id)
+        let node = PersistedPaneNode(id: pane.id, kind: .pane(pane))
+        let remote = RemoteWorkspace(destination: "devbox", path: "~/work/prism")
+        let ws = PersistedWorkspace(
+            id: UUID(),
+            workingDirectoryPath: dir,
+            root: node,
+            remote: remote
+        )
+
+        let data = try JSONEncoder().encode(ws)
+        let decoded = try JSONDecoder().decode(PersistedWorkspace.self, from: data)
+        XCTAssertEqual(decoded.remote, remote)
+    }
+
     func testPersistedWorkspaceDecodesNilWhenWorktreeFieldsMissing() throws {
         // Pre-worktree state.json files omit both keys — decode must succeed
         // and leave the fields nil so plain workspaces stay plain on upgrade.

@@ -53,6 +53,47 @@ final class WorkspaceStoreTests: XCTestCase {
         return pane
     }
 
+    func testInitialWorkspaceUsesInjectedTemplateForFreshWindow() {
+        let store = WorkspaceStore(
+            persistence: InMemoryPersistence(),
+            engineFactory: { TestEngine() },
+            optionsProvider: { _ in nil },
+            resumeProvider: { true },
+            initialWorkspaceTemplateProvider: { .claudeCode }
+        )
+
+        let session = store.workspaces[0].activeSession
+        XCTAssertEqual(session?.agent.id, "claude-code")
+        XCTAssertEqual(session.flatMap { engine($0).startedConfigs.first?.environment["KOOKY_AGENT"] }, "claude")
+    }
+
+    func testInitialWorkspaceTemplateDoesNotOverrideRestoredTabs() {
+        let tab = PersistedTab(id: UUID(), agentId: "terminal", currentDirectoryPath: "/tmp/projectA")
+        let pane = PersistedPane(id: UUID(), tabs: [tab], activeTabId: tab.id)
+        let workspace = PersistedWorkspace(
+            id: UUID(),
+            workingDirectoryPath: "/tmp/projectA",
+            root: PersistedPaneNode(id: pane.id, kind: .pane(pane)),
+            activePaneId: pane.id
+        )
+        let store = WorkspaceStore(
+            persistence: InMemoryPersistence(initial: PersistedState(
+                workspaces: [workspace],
+                activeWorkspaceId: workspace.id,
+                sidebarMode: nil,
+                rightSidebarMode: nil
+            )),
+            engineFactory: { TestEngine() },
+            optionsProvider: { _ in nil },
+            resumeProvider: { true },
+            initialWorkspaceTemplateProvider: { .claudeCode }
+        )
+
+        let session = store.workspaces[0].activeSession
+        XCTAssertEqual(session?.agent.id, "terminal")
+        XCTAssertNil(session.flatMap { engine($0).startedConfigs.first?.environment["KOOKY_AGENT"] })
+    }
+
     func testRequestRenameActiveTabSetsFlag() {
         let store = makeStore()
         XCTAssertEqual(store.active?.activeSession?.renameRequested, false)
@@ -137,6 +178,66 @@ final class WorkspaceStoreTests: XCTestCase {
         let store = makeStore()
         let ws = store.addWorkspace(workingDirectory: projectA, template: .claudeCode)
         XCTAssertEqual(firstPane(ws).tabs.first?.agent.id, AgentTemplate.claudeCode.id)
+    }
+
+    func testRemoteWorkspaceInitialTabLaunchesSSH() {
+        let store = makeStore()
+        let ws = store.addWorkspace(
+            remote: RemoteWorkspace(destination: "devbox", path: "~/work/prism")
+        )
+
+        let session = ws.activeSession
+        let command = session.flatMap { engine($0).startedConfigs.first?.environment["KOOKY_AGENT"] }
+        XCTAssertEqual(ws.remote, RemoteWorkspace(destination: "devbox", path: "~/work/prism"))
+        XCTAssertTrue(command?.contains("ssh -t 'devbox' sh -lc") == true)
+        XCTAssertTrue(command?.contains("kooky-remote-login:devbox") == true)
+        XCTAssertTrue(command?.contains("work/prism") == true)
+    }
+
+    func testRemoteWorkspaceAcceptsDestinationWithSshPrefix() {
+        let store = makeStore()
+        let ws = store.addWorkspace(
+            remote: RemoteWorkspace(destination: "ssh root@devbox", path: "~")
+        )
+
+        let command = ws.activeSession.flatMap {
+            engine($0).startedConfigs.first?.environment["KOOKY_AGENT"]
+        }
+        XCTAssertEqual(ws.title, "root@devbox")
+        XCTAssertTrue(command?.contains("ssh -t 'root@devbox' sh -lc") == true)
+        XCTAssertFalse(command?.contains("'ssh root@devbox'") == true)
+    }
+
+    func testRemoteWorkspaceAgentTabRunsAgentRemotely() {
+        let store = makeStore()
+        let ws = store.addWorkspace(
+            remote: RemoteWorkspace(destination: "root@devbox", path: "/srv/app")
+        )
+
+        let session = store.addTab(in: ws, template: .codex)
+        let command = engine(session).startedConfigs.first?.environment["KOOKY_AGENT"]
+        XCTAssertEqual(session.agent.id, "codex")
+        XCTAssertTrue(command?.contains("ssh -t 'root@devbox' sh -lc") == true)
+        XCTAssertTrue(command?.contains("/srv/app") == true)
+        XCTAssertTrue(command?.contains("-lic") == true)
+        XCTAssertTrue(command?.contains("kooky-agent:codex:running") == true)
+        XCTAssertTrue(command?.contains("codex") == true)
+        XCTAssertTrue(command?.contains("kooky-agent:codex:ended") == true)
+    }
+
+    func testRemoteWorkspacePwdReportUpdatesRemotePathOnly() {
+        let store = makeStore()
+        let ws = store.addWorkspace(
+            workingDirectory: projectA,
+            remote: RemoteWorkspace(destination: "devbox", path: "~/work/prism")
+        )
+        let session = ws.activeSession!
+
+        engine(session).emitPwd("/srv/app")
+
+        XCTAssertEqual(ws.remote?.path, "/srv/app")
+        XCTAssertEqual(ws.workingDirectory.path, projectA.path)
+        XCTAssertEqual(session.currentDirectory.path, projectA.path)
     }
 
     func testRequestCloseWorkspaceClosesPlainWorkspaceImmediately() {
@@ -1024,6 +1125,24 @@ final class WorkspaceStoreTests: XCTestCase {
         let newSession = new?.tabs.first
         XCTAssertEqual(newSession?.agent.id, "claude-code")
         XCTAssertEqual((newSession?.engine as? TestEngine)?.startedConfigs.last?.workingDirectory, "/tmp/projectA/sub")
+    }
+
+    func testSplitPaneInRemoteWorkspaceKeepsRemoteSSHContext() {
+        let store = makeStore()
+        let ws = store.addWorkspace(
+            remote: RemoteWorkspace(destination: "root@devbox", path: "/srv/app"),
+            template: .codex
+        )
+        let pane = firstPane(ws)
+
+        let new = store.splitPane(pane, orientation: .vertical, in: ws)
+
+        let newSession = new?.tabs.first
+        let command = newSession.flatMap { engine($0).startedConfigs.first?.environment["KOOKY_AGENT"] }
+        XCTAssertEqual(newSession?.agent.id, "codex")
+        XCTAssertTrue(command?.contains("ssh -t 'root@devbox' sh -lc") == true)
+        XCTAssertTrue(command?.contains("/srv/app") == true)
+        XCTAssertTrue(command?.contains("codex") == true)
     }
 
     func testClosePaneCollapsesSiblingUp() {

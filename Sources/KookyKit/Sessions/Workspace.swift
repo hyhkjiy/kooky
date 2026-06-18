@@ -1,5 +1,28 @@
 import Foundation
 
+struct RemoteWorkspace: Codable, Equatable, Sendable {
+    var destination: String
+    var path: String
+
+    static func normalizedDestination(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("ssh ") else { return trimmed }
+        let rest = trimmed.dropFirst(4).trimmingCharacters(in: .whitespacesAndNewlines)
+        // Common user input is "ssh user@host"; accept it. More complex SSH
+        // options belong in ~/.ssh/config so kooky can keep the destination
+        // field as one safe argv token.
+        return rest.hasPrefix("-") ? trimmed : rest
+    }
+
+    var normalizedDestination: String {
+        Self.normalizedDestination(destination)
+    }
+
+    var displayPath: String {
+        path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "~" : path
+    }
+}
+
 @MainActor
 @Observable
 final class Workspace: Identifiable {
@@ -11,6 +34,11 @@ final class Workspace: Identifiable {
     /// Single split tree per workspace. Always non-nil; a fresh workspace
     /// holds one Pane with one Session.
     var root: PaneNode
+    /// When non-nil, this workspace launches its tabs through SSH and treats
+    /// `remote.path` as the project root. Local filesystem-derived features
+    /// such as Git and language runtime detection are disabled for these
+    /// workspaces unless they get a remote-aware backend later.
+    var remote: RemoteWorkspace?
     /// Currently focused leaf-pane id. Splits/closes update this so cwd
     /// tracking and ⌘D act on what the user is looking at.
     var activePaneId: UUID?
@@ -71,6 +99,12 @@ final class Workspace: Identifiable {
         // Mirror the active tab's OSC title so an `ssh` session shows the
         // remote host in the sidebar, not the stale local directory.
         if let reported = activeSession?.terminalTitle, !reported.isEmpty { return reported }
+        if let remote {
+            let path = remote.displayPath
+            if path == "~" { return remote.normalizedDestination }
+            let last = (path as NSString).lastPathComponent
+            return last.isEmpty ? remote.normalizedDestination : "\(remote.normalizedDestination):\(last)"
+        }
         if workingDirectory.path == NSHomeDirectory() { return "Home" }
         let last = workingDirectory.lastPathComponent
         return last.isEmpty ? workingDirectory.path : last
