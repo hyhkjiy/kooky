@@ -5,6 +5,7 @@ import SwiftUI
 /// when switching directly between modes (create → confirm-remove).
 private enum SidebarSheet: Identifiable {
     case remoteSSHWorkspace
+    case editRemoteSSHWorkspace(Workspace)
     case createWorktree(Workspace)
     case confirmRemoveWorktree(Workspace)
     case confirmCloseOthers(WorkspaceStore.BulkRemovalRequest)
@@ -13,6 +14,7 @@ private enum SidebarSheet: Identifiable {
     var id: String {
         switch self {
         case .remoteSSHWorkspace: return "remote-ssh-workspace"
+        case .editRemoteSSHWorkspace(let ws): return "edit-remote-\(ws.id.uuidString)"
         case .createWorktree(let ws): return "create-\(ws.id.uuidString)"
         case .confirmRemoveWorktree(let ws): return "remove-\(ws.id.uuidString)"
         case .confirmCloseOthers(let req): return "close-others-\(req.keeping.id.uuidString)"
@@ -85,12 +87,19 @@ struct SidebarView: View {
             switch current {
             case .remoteSSHWorkspace:
                 RemoteSSHWorkspaceSheet(
-                    create: { remote in
+                    submit: { remote in
                         store.addWorkspace(
                             workingDirectory: URL(fileURLWithPath: NSHomeDirectory()),
                             remote: remote
                         )
                     },
+                    dismiss: { sheet = nil }
+                )
+            case .editRemoteSSHWorkspace(let workspace):
+                RemoteSSHWorkspaceSheet(
+                    mode: .edit,
+                    remote: workspace.remote,
+                    submit: { remote in store.updateRemoteWorkspace(workspace, remote: remote) },
                     dismiss: { sheet = nil }
                 )
             case .createWorktree(let source):
@@ -354,6 +363,9 @@ struct SidebarView: View {
                     toggle: { toggleCollapsed(parent.id) }
                 )
                 : nil,
+            onEditRemote: parent.remote != nil
+                ? { sheet = .editRemoteSSHWorkspace(parent) }
+                : nil,
             onCreateWorktree: canCreate ? { presentCreateWorktree(parent) } : nil
         )
 
@@ -369,6 +381,9 @@ struct SidebarView: View {
                     onCloseOthers: { store.closeOtherWorkspaces(keeping: worktree) },
                     onDuplicate: { store.duplicateWorkspace(worktree) },
                     onRename: { store.renameWorkspace(worktree, to: $0) },
+                    onEditRemote: worktree.remote != nil
+                        ? { sheet = .editRemoteSSHWorkspace(worktree) }
+                        : nil,
                     onGoToSource: { store.activateWorkspace(parent) }
                 )
             }
@@ -427,6 +442,7 @@ private struct DraggableWorkspaceRow: View {
     /// Worktree rows themselves render via `SidebarWorkspaceRow` directly,
     /// without this wrapper, so they don't pick up drag/drop handlers.
     var disclosure: SidebarWorkspaceRow.WorktreeDisclosure? = nil
+    var onEditRemote: (() -> Void)? = nil
     var onCreateWorktree: (() -> Void)? = nil
     var onGoToSource: (() -> Void)? = nil
 
@@ -451,6 +467,7 @@ private struct DraggableWorkspaceRow: View {
             onCloseOthers: { store.closeOtherWorkspaces(keeping: workspace) },
             onDuplicate: { store.duplicateWorkspace(workspace) },
             onRename: { store.renameWorkspace(workspace, to: $0) },
+            onEditRemote: onEditRemote,
             disclosure: disclosure,
             onCreateWorktree: onCreateWorktree,
             onGoToSource: onGoToSource
@@ -471,4 +488,5 @@ private struct DraggableWorkspaceRow: View {
             return true
         } isTargeted: { isTargeted = $0 }
     }
+
 }

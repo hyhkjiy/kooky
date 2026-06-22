@@ -208,6 +208,29 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertFalse(command?.contains("'ssh root@devbox'") == true)
     }
 
+    func testUpdateRemoteWorkspacePersistsCommandAndPath() throws {
+        let persistence = InMemoryPersistence()
+        let store = WorkspaceStore(
+            persistence: persistence,
+            engineFactory: { TestEngine() },
+            optionsProvider: { _ in nil },
+            resumeProvider: { true }
+        )
+        let ws = store.addWorkspace(
+            remote: RemoteWorkspace(destination: "devbox", path: "~/old")
+        )
+
+        store.updateRemoteWorkspace(
+            ws,
+            remote: RemoteWorkspace(destination: "ssh root@devbox", path: "/srv/app")
+        )
+        store.flushPersistence()
+
+        XCTAssertEqual(ws.remote, RemoteWorkspace(destination: "root@devbox", path: "/srv/app"))
+        let saved = try XCTUnwrap(persistence.saved)
+        XCTAssertEqual(saved.workspaces.last?.remote, RemoteWorkspace(destination: "root@devbox", path: "/srv/app"))
+    }
+
     func testRemoteWorkspaceAgentTabRunsAgentRemotely() {
         let store = makeStore()
         let ws = store.addWorkspace(

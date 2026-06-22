@@ -555,6 +555,19 @@ final class WorkspaceStore {
         scheduleSave()
     }
 
+    /// Update the SSH launch metadata for a remote workspace. Existing tabs keep
+    /// their live SSH process; new tabs / agents / splits use the updated values.
+    func updateRemoteWorkspace(_ workspace: Workspace, remote: RemoteWorkspace) {
+        guard workspace.remote != nil else { return }
+        let next = RemoteWorkspace(
+            destination: RemoteWorkspace.normalizedDestination(remote.destination),
+            path: remote.displayPath
+        )
+        guard workspace.remote != next else { return }
+        workspace.remote = next
+        scheduleSave()
+    }
+
     /// Reorder workspaces in the sidebar — dragged workspace takes the
     /// destination index, others shift.
     func moveWorkspace(from sourceIndex: Int, to destIndex: Int) {

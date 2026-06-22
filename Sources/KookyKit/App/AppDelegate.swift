@@ -8,6 +8,7 @@ import SwiftUI
 private enum MenuTag {
     static let tabRange = 1...9
     static let workspaceRange = 101...109
+    static let editRemoteWorkspace = 1000
     static func tab(_ n: Int) -> Int { n }
     static func workspace(_ n: Int) -> Int { 100 + n }
     static func tabIndex(from tag: Int) -> Int { tag - 1 }
@@ -64,6 +65,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
             }
         }
     }
+    private var remoteSSHWorkspaceSheetWindow: NSWindow?
 
 
     public override init() { super.init() }
@@ -492,14 +494,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
             responderRow("Quit \(KookyApp.name)", #selector(NSApplication.terminate(_:)), "q"),
         ])))
 
-        mainMenu.addItem(submenu(buildMenu(title: "File", entries: [
+        let fileMenu = buildMenu(title: "File", entries: [
             selfRow("New Tab", #selector(handleNewTab), "t"),
             selfRow("New Workspace", #selector(handleNewWorkspace), "n"),
+            selfRow("New Remote SSH Workspace…", #selector(handleNewRemoteSSHWorkspace), modifiers: []),
             selfRow("New Window", #selector(handleNewWindow), "n", modifiers: [.command, .shift]),
             .separator,
             selfRow("Quick Open…", #selector(handleQuickOpen), "p"),
             selfRow("Notifications", #selector(handleShowInbox), "i", modifiers: [.command, .shift]),
             selfRow("Open Folder…", #selector(handleOpenFolder), "o"),
+            .separator,
+            selfRow("Edit Remote SSH Workspace…", #selector(handleEditRemoteSSHWorkspace), modifiers: [], tag: MenuTag.editRemoteWorkspace),
             .separator,
             selfRow("Close Tab", #selector(handleCloseTab), "w"),
             selfRow("Reopen Closed Tab", #selector(handleReopenClosedTab), "t", modifiers: [.command, .shift]),
@@ -507,7 +512,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
             .separator,
             selfRow("Rename Tab…", #selector(handleRenameTab), "r"),
             selfRow("Rename Workspace…", #selector(handleRenameWorkspace), "r", modifiers: [.command, .shift]),
-        ])))
+        ])
+        fileMenu.delegate = self
+        mainMenu.addItem(submenu(fileMenu))
 
         // Edit menu — first-responder selectors so libghostty's NSResponder
         // implementation handles copy/paste inside the surface.
@@ -678,6 +685,73 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         activeStore?.addWorkspace()
     }
 
+    @objc private func handleNewRemoteSSHWorkspace() {
+        let controller = activeController ?? addWindow()
+        presentRemoteSSHWorkspaceSheet(for: controller, workspace: nil)
+    }
+
+    @objc private func handleEditRemoteSSHWorkspace() {
+        guard let controller = activeController,
+              let workspace = controller.store.active,
+              workspace.remote != nil else { return }
+        presentRemoteSSHWorkspaceSheet(for: controller, workspace: workspace)
+    }
+
+    private func presentRemoteSSHWorkspaceSheet(for controller: KookyWindowController, workspace: Workspace?) {
+        guard let parentWindow = controller.window else { return }
+        if let existing = remoteSSHWorkspaceSheetWindow {
+            if existing.sheetParent != nil {
+                existing.makeKeyAndOrderFront(nil)
+                return
+            }
+            remoteSSHWorkspaceSheetWindow = nil
+        }
+
+        guard remoteSSHWorkspaceSheetWindow == nil else {
+            return
+        }
+
+        var sheetWindow: NSWindow!
+        let store = controller.store
+        let currentRemote = workspace?.remote
+        let dismiss: () -> Void = { [weak self, weak parentWindow] in
+            guard let sheetWindow else { return }
+            if sheetWindow.sheetParent != nil {
+                parentWindow?.endSheet(sheetWindow)
+            }
+            sheetWindow.close()
+            self?.remoteSSHWorkspaceSheetWindow = nil
+        }
+        let view = RemoteSSHWorkspaceSheet(
+            mode: workspace == nil ? .create : .edit,
+            remote: currentRemote,
+            submit: { remote in
+                if let workspace {
+                    store.updateRemoteWorkspace(workspace, remote: remote)
+                } else {
+                    store.addWorkspace(
+                        workingDirectory: URL(fileURLWithPath: NSHomeDirectory()),
+                        remote: remote
+                    )
+                }
+            },
+            dismiss: dismiss
+        )
+        let host = NSHostingController(rootView: view)
+        sheetWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 260),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        sheetWindow.contentViewController = host
+        sheetWindow.title = "Remote SSH Workspace"
+        sheetWindow.isReleasedWhenClosed = false
+        sheetWindow.appearance = Theme.windowAppearance
+        remoteSSHWorkspaceSheetWindow = sheetWindow
+        parentWindow.beginSheet(sheetWindow)
+    }
+
     /// Internal (not `private`) so `#selector` in `ContentView` can typecheck.
     /// The runtime dispatch goes through Obj-C selectors either way.
     @objc func handleQuickOpen() {
@@ -841,6 +915,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
                 item.isHidden = item.tag > tabCount
             } else if MenuTag.workspaceRange.contains(item.tag) {
                 item.isHidden = MenuTag.workspaceIndex(from: item.tag) >= workspaceCount
+            } else if item.tag == MenuTag.editRemoteWorkspace {
+                item.isEnabled = store?.active?.remote != nil
             }
         }
     }

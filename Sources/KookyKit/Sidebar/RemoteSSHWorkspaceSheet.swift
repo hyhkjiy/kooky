@@ -1,14 +1,51 @@
 import SwiftUI
 
 struct RemoteSSHWorkspaceSheet: View {
-    let create: (RemoteWorkspace) -> Void
+    enum Mode {
+        case create
+        case edit
+
+        var title: String {
+            switch self {
+            case .create: return "Open a remote workspace"
+            case .edit: return "Edit remote workspace"
+            }
+        }
+
+        var subtitle: String {
+            switch self {
+            case .create:
+                return "New tabs and agents in this workspace launch over SSH in the remote path."
+            case .edit:
+                return "Future tabs and agents in this workspace launch with this SSH command and remote path."
+            }
+        }
+
+        var submitLabel: String {
+            switch self {
+            case .create: return "create"
+            case .edit: return "save"
+            }
+        }
+    }
+
+    let mode: Mode
+    let submit: (RemoteWorkspace) -> Void
     let dismiss: () -> Void
 
-    @State private var destination = ""
+    @State private var command = ""
     @State private var path = "~"
 
+    init(mode: Mode = .create, remote: RemoteWorkspace? = nil, submit: @escaping (RemoteWorkspace) -> Void, dismiss: @escaping () -> Void) {
+        self.mode = mode
+        self.submit = submit
+        self.dismiss = dismiss
+        _command = State(initialValue: remote.map { "ssh \($0.normalizedDestination)" } ?? "")
+        _path = State(initialValue: remote?.displayPath ?? "~")
+    }
+
     private var canSubmit: Bool {
-        !destination.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
@@ -19,11 +56,11 @@ struct RemoteSSHWorkspaceSheet: View {
                 .tracking(1.2)
                 .padding(.bottom, 18)
 
-            Text("Open a remote workspace")
+            Text(mode.title)
                 .font(Theme.display(20, weight: .medium))
                 .foregroundStyle(Theme.chromeForeground)
 
-            Text("New tabs and agents in this workspace launch over SSH in the remote path.")
+            Text(mode.subtitle)
                 .font(Theme.mono(11.5))
                 .foregroundStyle(Theme.chromeMuted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -35,16 +72,16 @@ struct RemoteSSHWorkspaceSheet: View {
                 .padding(.vertical, 22)
 
             VStack(alignment: .leading, spacing: 12) {
-                field(label: "destination", placeholder: "devbox or user@host", text: $destination)
+                field(label: "ssh-command", placeholder: "ssh devbox or root@host", text: $command)
                 field(label: "remote-path", placeholder: "~/work/project", text: $path)
             }
 
             HStack(spacing: 10) {
                 Spacer()
                 BracketButton("cancel") { dismiss() }
-                BracketButton("create") {
-                    create(RemoteWorkspace(
-                        destination: RemoteWorkspace.normalizedDestination(destination),
+                BracketButton(mode.submitLabel) {
+                    submit(RemoteWorkspace(
+                        destination: RemoteWorkspace.normalizedDestination(command),
                         path: path.trimmingCharacters(in: .whitespacesAndNewlines)
                     ))
                     dismiss()

@@ -18,6 +18,7 @@ struct SidebarWorkspaceRow: View {
     let onCloseOthers: () -> Void
     let onDuplicate: () -> Void
     let onRename: (String) -> Void
+    var onEditRemote: (() -> Void)? = nil
     var disclosure: WorktreeDisclosure? = nil
     /// Non-nil for source (top-level, non-worktree) workspaces — the
     /// right-click menu surfaces a "Create Worktree…" entry that the
@@ -68,6 +69,12 @@ struct SidebarWorkspaceRow: View {
                 KookyMenuRow(title: "Rename Workspace…", shortcut: "⌘⇧R") {
                     isContextMenuOpen = false
                     beginRename(deferred: true)
+                }
+                if let onEditRemote {
+                    KookyMenuRow(title: "Edit Remote SSH Workspace…") {
+                        isContextMenuOpen = false
+                        DispatchQueue.main.async { onEditRemote() }
+                    }
                 }
                 KookyMenuRow(title: "Duplicate Workspace") {
                     isContextMenuOpen = false
