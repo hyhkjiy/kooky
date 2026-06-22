@@ -13,6 +13,7 @@
 #   5. Adhoc codesign so Gatekeeper doesn't kill it on first launch
 #
 # Output: dist/Kooky.app — open it directly or drop into /Applications.
+# Pass --install to replace /Applications/Kooky.app after a successful build.
 # This is local-distribution-only. Codesigning + notarization for public
 # release is a separate step (requires Apple Developer ID).
 
@@ -32,6 +33,45 @@ fi
 BUNDLE_ID="com.iamcorey.kooky"
 APP_NAME="Kooky"
 APP="dist/${APP_NAME}.app"
+INSTALL=0
+INSTALL_DIR="/Applications"
+
+usage() {
+    cat <<USAGE
+Usage: $0 [--install] [--install-dir DIR]
+
+Options:
+  --install          Replace the installed ${APP_NAME}.app after building.
+  --install-dir DIR  Install directory to use with --install (default: /Applications).
+  -h, --help         Show this help.
+USAGE
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --install)
+            INSTALL=1
+            shift
+            ;;
+        --install-dir)
+            if [ -z "${2:-}" ]; then
+                echo "build-app.sh: --install-dir requires a directory" >&2
+                exit 1
+            fi
+            INSTALL_DIR="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "build-app.sh: unknown argument: $1" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
+done
 
 echo "==> Building release config"
 swift build -c release
@@ -188,3 +228,32 @@ echo ""
 echo "✓ Built ${APP} (v${VERSION})"
 echo "  open ${APP}              # launch"
 echo "  cp -R ${APP} /Applications  # install"
+echo "  ./scripts/build-app.sh --install  # build + replace installed app"
+
+if [ "$INSTALL" -eq 1 ]; then
+    TARGET="${INSTALL_DIR%/}/${APP_NAME}.app"
+
+    echo ""
+    echo "==> Installing ${TARGET}"
+    if pgrep -x "${APP_NAME}" >/dev/null 2>&1; then
+        echo "==> Quitting running ${APP_NAME}"
+        osascript -e "quit app \"${APP_NAME}\"" >/dev/null 2>&1 || true
+        sleep 1
+    fi
+
+    if [ ! -d "$INSTALL_DIR" ]; then
+        echo "build-app.sh: install directory does not exist: $INSTALL_DIR" >&2
+        exit 1
+    fi
+
+    if [ ! -w "$INSTALL_DIR" ] || { [ -e "$TARGET" ] && [ ! -w "$TARGET" ]; }; then
+        sudo -v
+        sudo rm -rf "$TARGET"
+        sudo cp -R "$APP" "$INSTALL_DIR/"
+    else
+        rm -rf "$TARGET"
+        cp -R "$APP" "$INSTALL_DIR/"
+    fi
+
+    echo "✓ Installed ${TARGET}"
+fi
